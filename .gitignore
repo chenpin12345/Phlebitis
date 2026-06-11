@@ -1,0 +1,42 @@
+# 環境與建置產物
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+test-results/
+*.cache
+*.log
+
+# 金鑰
+.env
+
+# 病患影像、標註、模型與執行資料（隱私：不得上傳）
+/03_模型與影像資料/
+/data/
+/models/
+/runs/
+/runtime/
+/archive/
+/inbox/
+/靜脈炎_照片/
+/YOLODataset/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.heic
+*.webp
+*.tif
+*.tiff
+*.pt
+*.onnx
+*.db
+*.sqlite*
+*.docx
+*.pdf
+*.pptx
+*.xlsx
+*.csv
+*.zip
