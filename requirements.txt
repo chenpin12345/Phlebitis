@@ -1,0 +1,13 @@
+ultralytics==8.4.161
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+httpx>=0.28,<1
+python-dotenv>=1.0,<2
+Pillow>=11,<13
+PyYAML>=6,<7
+numpy>=2,<3
+scikit-learn>=1.6,<2
+transformers>=4.46,<5
+safetensors>=0.4,<1
+psutil>=7,<8
+python-multipart>=0.0.20,<1

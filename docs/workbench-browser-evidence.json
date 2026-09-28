@@ -1,0 +1,56 @@
+{
+  "evidence": [
+    {
+      "overview_loaded": true
+    },
+    {
+      "page": "data",
+      "heading": true
+    },
+    {
+      "page": "models",
+      "heading": true
+    },
+    {
+      "page": "simulator",
+      "heading": true
+    },
+    {
+      "page": "cases",
+      "heading": true
+    },
+    {
+      "page": "settings",
+      "heading": true
+    },
+    {
+      "annotation_draft": 1,
+      "saved": false
+    },
+    {
+      "dino_hides_epochs": true
+    },
+    {
+      "invalid_experiment_shows_error": true
+    },
+    {
+      "simulated_text_reply": true
+    },
+    {
+      "synthetic_photo_reply": true
+    },
+    {
+      "authorized_synthetic_case_saved": true
+    },
+    {
+      "synthetic_case_withdrawn": true
+    },
+    {
+      "read_failure_visible": true
+    },
+    {
+      "mobile_no_overflow": true
+    }
+  ],
+  "errors": []
+}

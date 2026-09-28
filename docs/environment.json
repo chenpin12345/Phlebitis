@@ -1,0 +1,15 @@
+{
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "torch": "2.13.0+cu130",
+  "cuda_runtime": "13.0",
+  "cuda_available": true,
+  "gpu": "NVIDIA GeForce RTX 5050 Laptop GPU",
+  "vram_bytes": 8546484224,
+  "gpu_compute_ok": true,
+  "ultralytics": "8.4.161",
+  "torchvision": "0.28.0+cu130",
+  "fastapi": "0.141.1",
+  "httpx": "0.28.1",
+  "Pillow": "12.3.0",
+  "numpy": "2.5.2"
+}
