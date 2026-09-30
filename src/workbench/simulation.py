@@ -152,10 +152,13 @@ def run_regression(config,folder):
     with db() as con: cases=[json.loads(r[0]) for r in con.execute('SELECT data FROM cases')]
     cases=[c for c in cases if c.get('state')=='confirmed']
     previous={};baseline_id=None
-    for path in sorted(folder.parent.glob('*/regression.json'),key=lambda p:p.stat().st_mtime,reverse=True):
-        if path.parent==folder:continue
-        report=read_json(path);baseline_id=path.parent.name
-        previous={(c['case'],c.get('revision')):c for c in report['cases']};break
+    from src.workbench.resources import require_active
+    from src.workbench import jobs
+    baseline_id=config.get('baseline_job')
+    if baseline_id:
+        require_active('job',baseline_id)
+        report=read_json(jobs.folder(baseline_id)/'regression.json')
+        previous={(c['case'],c.get('revision')):c for c in report['cases']}
     outcomes=[]
     for case in cases:
         check_cancel(folder)

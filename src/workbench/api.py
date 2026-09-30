@@ -8,23 +8,27 @@ import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image, ImageOps
 from src.common import ROOT, read_json, write_json, read_manifest, inside, stamp
-from src.workbench.storage import db, audit, digest, HOME, flag
+from src.workbench.storage import db, audit, digest, HOME, flag, operator
 from src.workbench.contracts import MODELS, Experiment, Review, SnapshotRequest, SwitchRequest,InferenceConfig
 from src.workbench import jobs, registry, lifecycle, simulation
+from src.workbench import trash, resources, report_views
 
 def create_app(*,testing=False):
     manager=jobs.Manager()
+    maintenance=trash.Maintenance(secrets.token_urlsafe(32))
     @asynccontextmanager
     async def lifespan(app):
         if not testing:
+            maintenance.recover()
             from src.data.dataset import recover_reviews
             from src.workbench.storage import file_lock
             with file_lock(ROOT/'runtime/data.lock'): recover_reviews(ROOT)
@@ -32,9 +36,18 @@ def create_app(*,testing=False):
             manager.start()
         yield
         manager.close()
+        maintenance.close()
     app=FastAPI(title='Phlebitis local workbench',lifespan=lifespan,docs_url=None,redoc_url=None)
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost']+(['testserver'] if testing else []))
     csrf=secrets.token_urlsafe(32)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request,exc):
+        return JSONResponse({'detail':[{'loc':e.get('loc',[]),'type':e.get('type','invalid')} for e in exc.errors()]},status_code=422)
+
+    @app.exception_handler(resources.ResourceUnavailable)
+    async def resource_error(request,exc):
+        return JSONResponse({'detail':str(exc),'resource_state':exc.state,'type':exc.kind,'id':exc.ident},status_code=410 if exc.state=='purged' else 409)
 
     @app.middleware('http')
     async def browser_boundary(request,call_next):
@@ -53,7 +66,14 @@ def create_app(*,testing=False):
                     if size>1048576:return JSONResponse({'detail':'JSON request exceeds 1 MB'},status_code=413)
                     chunks.append(chunk)
                 request._body=b''.join(chunks)
-        response=await call_next(request)
+        actor=unquote(request.headers.get('x-operator','')).strip()
+        if len(actor)>100: return JSONResponse({'detail':'操作者名稱過長'},status_code=400)
+        actor_token=operator.set(actor or None)
+        try:
+            response=await call_next(request)
+            if request.method not in ('GET','HEAD','OPTIONS') and response.status_code>=400:
+                audit('request_failed',{'path':request.url.path,'method':request.method,'status':response.status_code},outcome='failed')
+        finally: operator.reset(actor_token)
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Cache-Control']='no-store'
         response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"
@@ -70,20 +90,92 @@ def create_app(*,testing=False):
     @app.get('/api/v1/session')
     def session():return {'csrf':csrf,'actor':'local_operator','research_only':True}
 
+    @app.get('/api/v1/trash')
+    def trash_list(type:str='',search:str='',start:str='',end:str='',actor:str='',sort:str='moved',direction:str='desc',page:int=1,size:int=30):
+        return trash.list_trash(type,search,start,end,actor,sort,direction,page,size)
+
+    @app.post('/api/v1/trash/previews')
+    def trash_preview(body:trash.PreviewRequest):return maintenance.preview(body)
+
+    @app.get('/api/v1/trash/previews/{ident}')
+    def trash_preview_status(ident,page:int=1,size:int=100):return maintenance.get_preview(ident,page,size)
+
+    @app.post('/api/v1/trash/operations')
+    def trash_commit(body:trash.CommitRequest,request:Request):return maintenance.commit(body,request.headers.get('idempotency-key'))
+
+    @app.get('/api/v1/trash/operations/{ident}')
+    def trash_operation(ident):return trash.operation(ident)
+
+    @app.post('/api/v1/trash/operations/{ident}/retry')
+    def trash_retry(ident):return maintenance.retry(ident)
+
+    @app.post('/api/v1/trash/capacity')
+    def trash_capacity(body:list[trash.Target]):
+        if not 1<=len(body)<=100:raise ValueError('每次限 1–100 個明確項目')
+        return maintenance.capacity(body)
+
+    @app.get('/api/v1/trash/{kind}/{ident}')
+    def trash_detail(kind,ident):
+        item=resources.record(kind,ident)
+        if item['state']=='active':raise ValueError('此資源不在垃圾桶')
+        return item
+
+    @app.get('/api/v1/references')
+    def references():return trash.reference_chains()
+
+    @app.post('/api/v1/references/{target}/preview')
+    def reference_preview(target,body:trash.ReferenceRequest):return maintenance.reference_preview(target,body)
+
+    @app.post('/api/v1/references/commit')
+    def reference_commit(body:trash.CommitRequest):return maintenance.reference_commit(body)
+
+    @app.get('/api/v1/reports-query')
+    def reports_query(model:str='',page:int=1,size:int=30):return report_views.query(model,page,size)
+
+    @app.get('/api/v1/reports/{ident}/samples')
+    def report_samples(ident,page:int=1,size:int=30):return report_views.samples(ident,page,size)
+
+    @app.get('/api/v1/reports/{ident}/detail')
+    def report_detail(ident):
+        report=next((r for r in report_views.listing() if r['report_id']==ident),None)
+        if report is None:raise FileNotFoundError(ident)
+        return {k:v for k,v in report.items() if k!='samples'}
+
+    @app.get('/api/v1/reports/{ident}/comparison/{image}')
+    def report_comparison(ident,image,model:str=''):
+        current=report_views.get(ident)
+        if image not in {s['image_id'] for s in current.get('samples',[])}:raise ValueError('圖片不屬於選取報告')
+        result=[]
+        for r in report_views.listing():
+            if model and r.get('model')!=model:continue
+            if r['snapshot']!=current['snapshot'] or r['fold']!=current['fold'] or r['metrics']['member_hash']!=current['metrics']['member_hash'] or not r['metrics']['complete'] or r.get('snapshot_state'):continue
+            sample=next((s for s in r['samples'] if s['image_id']==image),None)
+            if sample:result.append({k:v for k,v in {**r,'sample':sample}.items() if k!='samples'})
+        return result
+
     @app.get('/api/v1/overview')
     def overview():
         from collections import Counter
-        rows=read_manifest(); states=jobs.listing()
-        return {'data':dict(Counter(r['status'] for r in rows)),'approved_labels':dict(Counter(r['label_state'] for r in rows if r['status']=='approved')),'verified_subjects':len({r['subject_id'] for r in rows if r['group_verified']=='true' and r['subject_id']}),'jobs':states,'references':{t:read_json(registry.REFS/(t+'.json')) if (registry.REFS/(t+'.json')).exists() else None for t in ('local','line')},'artifacts':len(registry.listing())}
+        from src.workbench.views import data_rows, in_view, VIEWS
+        from src.workbench.storage import dataset_lock
+        with dataset_lock(ROOT): rows=data_rows(ROOT)
+        states=jobs.listing()
+        return {'data':{v:sum(in_view(r,v) for r in rows) for v in VIEWS},'approved_labels':dict(Counter(r['label_state'] for r in rows if r['training_eligible'])),'verified_subjects':len({r['subject_id'] for r in rows if r['group_verified']=='true' and r['subject_id']}),'jobs':states,'references':{t:read_json(registry.REFS/(t+'.json')) if (registry.REFS/(t+'.json')).exists() else None for t in ('local','line')},'artifacts':len(registry.listing())}
 
     @app.get('/api/v1/doctor')
     def doctor():
-        import torch
-        packages={}
+        packages={}; errors=[]; cuda=gpu=vram=free=None
         for name in ['torch','torchvision','ultralytics','transformers','safetensors','scikit-learn','fastapi','psutil']:
             try:packages[name]=version(name)
             except PackageNotFoundError:packages[name]=None
-        return {'packages':packages,'cuda':torch.cuda.is_available(),'gpu':torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,'vram':torch.cuda.get_device_properties(0).total_memory if torch.cuda.is_available() else None,'free_disk_gb':round(shutil.disk_usage(ROOT).free/1024**3,1),'frontend_ready':(ROOT/'web/dist/index.html').exists(),'ports':{'workbench':8765,'line':8000},'line_credentials_required':False,'repair':'執行 scripts/setup-workbench.ps1 安裝專案依賴；GPU 不可用時明確選擇 CPU。'}
+        try:
+            import torch
+            cuda=torch.cuda.is_available()
+            if cuda: gpu=torch.cuda.get_device_name(0);vram=torch.cuda.get_device_properties(0).total_memory
+        except Exception as exc: errors.append('GPU 檢查失敗：'+str(exc))
+        try: free=round(shutil.disk_usage(ROOT).free/1024**3,1)
+        except OSError as exc: errors.append('磁碟檢查失敗：'+str(exc))
+        return {'packages':packages,'cuda':cuda,'gpu':gpu,'vram':vram,'free_disk_gb':free,'check_errors':errors,'frontend_ready':(ROOT/'web/dist/index.html').exists(),'ports':{'workbench':8765,'line':8000},'line_credentials_required':False,'repair':'執行 scripts/setup-workbench.ps1 安裝專案依賴；GPU 不可用時明確選擇 CPU。'}
 
     @app.get('/api/v1/line/state')
     def line_state():
@@ -108,6 +200,60 @@ def create_app(*,testing=False):
     @app.get('/api/v1/data')
     def data():return [{**r,'revision':digest(r)} for r in read_manifest()]
 
+    @app.get('/api/v1/data-query')
+    def data_query(view:str='pending_review',reviewer:str='',decision:str='',start:str='',end:str='',page:int=1,size:int=30):
+        from src.workbench.views import query_data
+        from src.workbench.storage import dataset_lock
+        with dataset_lock(ROOT): return query_data(ROOT,view,reviewer,decision,start,end,page,size)
+
+    @app.get('/api/v1/audit-query')
+    def audit_query(actor:str='',action:str='',related:str='',outcome:str='',start:str='',end:str='',page:int=1,size:int=30,snapshot:str=''):
+        from src.workbench.views import query_audit
+        with db() as con: return query_audit(con,actor,action,related,outcome,start,end,page,size,int(snapshot) if snapshot else None)
+
+    @app.get('/api/v1/jobs/{ident}/curves')
+    def job_curves(ident):
+        from src.workbench.presentation import curves
+        return curves(ident)
+
+    @app.get('/api/v1/curve-sources')
+    def curve_sources():
+        from src.workbench.presentation import curve_sources
+        return curve_sources(ROOT)
+
+    @app.get('/api/v1/curve-history')
+    def curve_history(source:str):
+        from src.workbench.presentation import curve_source
+        return curve_source(source,ROOT)
+
+    @app.get('/api/v1/curve-image')
+    def curve_image(source:str):
+        from src.workbench.presentation import curve_image
+        return FileResponse(curve_image(source,ROOT),media_type='image/png')
+
+    @app.get('/api/v1/artifacts/{ident}/detail')
+    def artifact_detail(ident):
+        from src.workbench.presentation import artifact_detail
+        return artifact_detail(ident)
+
+    @app.get('/api/v1/artifacts/{ident}/settings')
+    def artifact_settings(ident,key:str):
+        from src.workbench.presentation import file_settings
+        return file_settings(ident,key)
+
+    @app.get('/api/v1/artifacts/{ident}/export')
+    def artifact_export(ident):
+        from src.workbench.presentation import artifact_detail
+        return JSONResponse(artifact_detail(ident),headers={'Content-Disposition':'attachment; filename="model-settings.json"'})
+
+    @app.get('/api/v1/artifacts/{ident}/file')
+    def artifact_download(ident,key:str):
+        from src.workbench.presentation import artifact_file,file_settings
+        path=artifact_file(ident,key)
+        if path.suffix.lower() in ('.json','.yaml','.yml'):
+            return JSONResponse(file_settings(ident,key),headers={'Content-Disposition':'attachment; filename="settings.json"'})
+        return FileResponse(path,filename=path.name)
+
     def find_image(ident):
         row=next((r for r in read_manifest() if r['image_id']==ident),None)
         if row is None: raise HTTPException(404)
@@ -125,19 +271,21 @@ def create_app(*,testing=False):
         from src.data.labels import orient_boxes,from_labelme
         row=find_image(ident)
         with Image.open(inside(row['image_path'])) as im: orientation=im.getexif().get(274,1); size=im.size
-        boxes=[]
+        boxes=[]; diagnostic=None
         if row['yolo_path'] and inside(row['yolo_path']).exists(): boxes=[list(map(float,line.split())) for line in inside(row['yolo_path']).read_text().splitlines() if line.strip()]
         elif row['annotation_path']:
             try: boxes=from_labelme(read_json(inside(row['annotation_path'])),size)
-            except ValueError: pass
+            except ValueError as exc: diagnostic=str(exc)
         history=[read_json(p) for p in sorted((ROOT/'data/reviews').glob('*_'+ident+'.json'))]
-        return {'row':row,'revision':digest(row),'boxes':orient_boxes(boxes,orientation),'orientation':orientation,'original_size':size,'coordinate_system':'EXIF-corrected normalized YOLO xywh','history':history}
+        return {'row':row,'revision':digest(row),'boxes':orient_boxes(boxes,orientation),'orientation':orientation,'original_size':size,'coordinate_system':'EXIF-corrected normalized YOLO xywh','history':history,'coordinate_warning':diagnostic}
 
     @app.put('/api/v1/data/{ident}')
     def save_review(ident,body:Review):
         from src.data.labels import orient_boxes,validate
         from src.data.dataset import review
         row=find_image(ident)
+        existing=annotation(ident)
+        if existing['coordinate_warning'] and body.coordinate_resolution!='redraw': raise ValueError('舊標註座標需人工確認；請選擇在正向預覽重新標註，原始檔仍保留。')
         validate(body.boxes)
         if body.label=='positive' and body.status=='approved' and not body.boxes: raise ValueError('陽性資料必須標註矩形框')
         if body.label=='negative' and body.boxes: raise ValueError('陰性資料不可包含病灶框')
@@ -149,7 +297,7 @@ def create_app(*,testing=False):
         try:
             args=body.model_dump();args.pop('boxes')
             result=review(ident,annotation=str(staged),**args)
-            audit('review',{'image_id':ident,'reason':body.reason,'reviewer':body.reviewer,'revision_before':body.revision})
+            audit('review',{'image_id':ident,'reason':body.reason,'reviewer':body.reviewer,'revision_before':body.revision},actor=body.reviewer)
             return result
         finally:staged.unlink(missing_ok=True)
 
@@ -216,11 +364,16 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/jobs/{ident}')
     def job(ident):
+        state=resources.record('job',ident)['state']
+        if state=='purged':raise resources.ResourceUnavailable('job',ident,state)
         item=jobs.get(ident); log=jobs.folder(ident)/'worker.log'
+        item['resource_state']=state
         item['log']=log.read_text(encoding='utf-8',errors='replace')[-18000:] if log.exists() else ''
         curve=jobs.folder(ident)/'progress.jsonl'
-        item['history']=[json.loads(line) for line in curve.read_text(encoding='utf-8').splitlines()[-1000:]] if curve.exists() else []
-        return item
+        from src.workbench.presentation import history
+        item['history']=history(curve)[-1000:]
+        from src.workbench.views import redact
+        return redact(item)
 
     @app.get('/api/v1/jobs/{ident}/events')
     async def job_events(ident,request:Request):
@@ -283,8 +436,7 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/reports')
     def reports():
-        states_path=ROOT/'data/snapshot_states.json';states=read_json(states_path) if states_path.exists() else {}
-        return [{**read_json(p),'report_id':p.parent.name,'snapshot_state':states.get(read_json(p).get('snapshot'))} for p in sorted((ROOT/'runs/workbench/evaluations').glob('*/report.json'))]
+        return report_views.listing()
 
     @app.get('/api/v1/reports/{ident}/export')
     def report_export(ident):
@@ -294,18 +446,7 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/reports/{ident}/images/{image}')
     def report_image(ident,image):
-        jobs.folder(ident)
-        if not image.replace('_','').replace('-','').isalnum():raise ValueError('Invalid image ID')
-        return FileResponse(ROOT/'runs/workbench/evaluations'/ident/(image+'.jpg'))
-
-    @app.post('/api/v1/reports/oof')
-    def oof(body:dict):
-        from src.workbench.metrics import aggregate
-        paths=[ROOT/'runs/workbench/evaluations'/jobs.folder(i).name/'report.json' for i in body['reports']]
-        reports=[read_json(p) for p in paths]
-        states=read_json(ROOT/'data/snapshot_states.json') if (ROOT/'data/snapshot_states.json').exists() else {}
-        if any(r['snapshot'] in states for r in reports):raise ValueError('撤銷／不適用的資料快照不可彙整為目前效能。')
-        return aggregate(reports)
+        return FileResponse(report_views.image_path(ident,image),media_type='image/jpeg')
 
     @app.post('/api/v1/assets')
     async def upload(request:Request,research:bool=False,authorization:str='',purpose:str=''):
@@ -391,7 +532,7 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/audit')
     def audits():
-        with db() as con:return [dict(r) for r in con.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 200')]
+        with db() as con:return [dict(r) for r in con.execute("SELECT * FROM audit WHERE NOT EXISTS (SELECT 1 FROM resource_lifecycle r WHERE r.type='audit' AND r.id=CAST(audit.id AS TEXT) AND r.state!='active') ORDER BY id DESC LIMIT 200")]
 
     @app.get('/api/v1/templates')
     def templates():return flag('templates') or []

@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from src.common import ROOT, inside, read_json, write_json, sha256, stamp
 from src.workbench.storage import audit, file_lock, digest
+from src.workbench.resources import guarded, require_active, states as resource_states
 
 VERSIONS = ROOT / 'models/versions'
 REFS = ROOT / 'models/references'
@@ -13,7 +14,10 @@ def artifact_path(ident):
         raise ValueError('Invalid model version')
     return VERSIONS / ident
 
+@guarded
 def register(source: Path, model: str, config: dict, experiment: str, demo=True, extra=None):
+    from src.workbench.resources import check_managed_path
+    check_managed_path(source)
     ident = model + '_' + uuid.uuid4().hex[:16]
     path = artifact_path(ident); stage = VERSIONS / ('.' + ident)
     stage.mkdir(parents=True)
@@ -27,6 +31,7 @@ def register(source: Path, model: str, config: dict, experiment: str, demo=True,
     return metadata
 
 def get(ident, verify=True):
+    if verify: require_active('model',ident)
     path = artifact_path(ident)
     metadata = read_json(path/'artifact.json')
     if verify:
@@ -39,7 +44,7 @@ def get(ident, verify=True):
 def reports(ident):
     return [read_json(p) for p in sorted((ROOT/'runs/workbench/evaluations').glob('*/report.json')) if read_json(p).get('artifact') == ident]
 
-def listing():
+def listing(include_trashed=False):
     from src.workbench.storage import db
     import json
     with db() as con:
@@ -47,8 +52,10 @@ def listing():
     states_path=ROOT/'data/snapshot_states.json'
     states=read_json(states_path) if states_path.exists() else {}
     result=[]
+    lifecycle=resource_states('model')
     for p in VERSIONS.glob('*/artifact.json'):
         if p.parent.name.startswith('.'): continue
+        if not include_trashed and lifecycle.get(p.parent.name,'active')!='active':continue
         meta=read_json(p); evaluations=reports(meta['id'])
         meta['reports']=[{**r,'applicable':r.get('snapshot') not in states} for r in evaluations]
         latest=next((j for j in evaluation_jobs if json.loads(j['config']).get('artifact')==meta['id']),None)
@@ -60,6 +67,7 @@ def listing():
         result.append(meta)
     return sorted(result,key=lambda x:x['created'],reverse=True)
 
+@guarded
 def activate(ident, target='local', allow_unevaluated=False):
     if target not in ('local','line'): raise ValueError('Invalid reference')
     with file_lock(ROOT/'runtime/registry.lock'):

@@ -109,6 +109,8 @@ class Experiment(Strict):
         return self
 
 class Review(Strict):
+    decision: Literal['approve','exclude','needs_changes','reopen'] | None = None
+    coordinate_resolution: Literal['redraw'] | None = None
     revision: str
     status: Literal['approved','pending_review','excluded']
     label: Literal['positive','negative','unknown']

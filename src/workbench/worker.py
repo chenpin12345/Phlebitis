@@ -7,6 +7,8 @@ from src.workbench.contracts import Experiment
 
 def main(ident):
     path=jobs.folder(ident); request=read_json(path/'request.json'); config=request['config']
+    from src.workbench.storage import operator
+    operator.set(request.get('actor'))
     try:
         with OperationLock():
             adapters.check_cancel(path)
@@ -43,5 +45,12 @@ def main(ident):
     except BaseException as exc:
         traceback.print_exc()
         jobs.update(ident,'failed',type(exc).__name__+': '+str(exc))
+    finally:
+        try:
+            from src.workbench.trash import seal_job
+            from src.workbench.resources import resource_lock
+            with resource_lock():seal_job(ident)
+        except Exception:
+            traceback.print_exc()
 
 if __name__=='__main__': main(sys.argv[1])

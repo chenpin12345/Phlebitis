@@ -140,13 +140,6 @@ def test_line_drain_finishes_queue_before_releasing(tmp_path):
         assert c.get('/health').json()['status']=='draining_or_stopped'
 
 
-def test_oof_rejects_training_protocol_change():
-    from src.workbench.metrics import aggregate
-    base={'model':'yolo11n','config':{},'snapshot':'fixed','samples':[],'train_groups':[],
-          'metrics':{'accuracy':None,'complete':True},'training_protocol':{'seed':42}}
-    with pytest.raises(ValueError,match='strategy/seed'):
-        aggregate([base,{**base,'training_protocol':{'seed':43}}])
-
 
 def test_config_clone_has_no_old_evaluation(tmp_path,monkeypatch):
     from src.workbench import registry

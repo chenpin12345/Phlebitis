@@ -138,12 +138,15 @@ def efficient_train(cfg, split, folder, base):
         if scheduler and checkpoint.get('scheduler'): scheduler.load_state_dict(checkpoint['scheduler'])
         start=checkpoint['epoch']; best=checkpoint['best']; stale=checkpoint['stale']
         if start>=cfg.epochs: raise ValueError('Checkpoint already completed requested epochs')
-    effective={'parameters':params,'total_parameters':sum(p.numel() for p in model.parameters()),'trainable_parameters':sum(p.numel() for p in model.parameters() if p.requires_grad),'checkpoint_metric':'validation_loss','preprocess':cfg.inference.preprocess}
+    actual={'freeze':params.get('freeze','backbone'),'scheduler':params.get('scheduler','none'),'class_weight':params.get('class_weight'),'flip':bool(params) and params.get('flip',True),'rotation':params.get('rotation',0),'optimizer':type(optimizer).__name__,'learning_rate':optimizer.param_groups[0]['lr'],'weight_decay':optimizer.param_groups[0]['weight_decay'],'epochs':cfg.epochs,'batch':cfg.batch,'imgsz':224,'device':cfg.device,'seed':cfg.seed,'patience':cfg.patience}
+    effective={'parameters':actual,'total_parameters':sum(p.numel() for p in model.parameters()),'trainable_parameters':sum(p.numel() for p in model.parameters() if p.requires_grad),'checkpoint_metric':'validation_loss','preprocess':cfg.inference.preprocess}
     write_json(folder/'effective.json',effective)
     output=folder/'artifact'; output.mkdir(exist_ok=True)
     if cfg.resume_job:
         oldbest=ROOT/'runs/workbench/jobs'/cfg.resume_job/'artifact/model.pt'
         if oldbest.exists(): shutil.copy2(oldbest,output/'model.pt')
+        selection=oldbest.parent.parent/'checkpoint_selection.json'
+        if selection.exists(): shutil.copy2(selection,folder/'checkpoint_selection.json')
     for epoch in range(start,cfg.epochs):
         check_cancel(folder); efficient_training_mode(model,params.get('freeze','backbone'))
         loss_sum=0; seen=0
@@ -160,6 +163,7 @@ def efficient_train(cfg, split, folder, base):
         if value<best:
             best=value; stale=0
             torch.save(model.cpu().state_dict(),output/'model.pt'); model.to(device)
+            write_json(folder/'checkpoint_selection.json',{'epoch':epoch+1,'value':value,'rule':'minimum validation_loss; strict improvement','artifact':'model.pt'})
         else: stale+=1
         if scheduler: scheduler.step()
         checkpoint={'epoch':epoch+1,'model':model.state_dict(),'optimizer':optimizer.state_dict(),'scheduler':scheduler.state_dict() if scheduler else None,'best':best,'stale':stale}
@@ -232,6 +236,11 @@ def yolo_train(cfg,split,folder,base):
         effective={'parameters':vars(trainer.args),'optimizer':type(trainer.optimizer).__name__,'learning_rates':[g['lr'] for g in trainer.optimizer.param_groups],'total_parameters':sum(p.numel() for p in trainer.model.parameters()),'trainable_parameters':previous.get('trainable_parameters') or sum(p.numel() for p in trainer.model.parameters() if p.requires_grad),'loss_names':list(trainer.loss_names),'end2end':bool(getattr(trainer.model,'end2end',False))}
         write_json(folder/'effective.json',effective)
     model.add_callback('on_fit_epoch_end',callback)
+    def record_selection(trainer):
+        # Match the installed trainer's best.pt write rule, including ties.
+        if trainer.best_fitness==trainer.fitness and trainer.best.is_file():
+            write_json(folder/'checkpoint_selection.json',{'epoch':trainer.epoch+1,'value':float(trainer.fitness),'rule':'Ultralytics best_fitness == fitness at on_model_save','artifact':'best.pt'})
+    model.add_callback('on_model_save',record_selection)
     model.add_callback('on_train_batch_end',lambda trainer:setattr(trainer,'stop',True) if (folder/'cancel').exists() else None)
     if cfg.resume_job:
         # Installed Ultralytics explicitly permits save_dir during resume.
@@ -239,6 +248,8 @@ def yolo_train(cfg,split,folder,base):
         weights=folder/'training/weights'; weights.mkdir(parents=True,exist_ok=True)
         previous=ROOT/'runs/workbench/jobs'/cfg.resume_job/'training/weights/best.pt'
         if previous.exists():shutil.copy2(previous,weights/'best.pt')
+        selection=ROOT/'runs/workbench/jobs'/cfg.resume_job/'checkpoint_selection.json'
+        if selection.exists():shutil.copy2(selection,folder/'checkpoint_selection.json')
         model.train(resume=True,device=cfg.device,workers=cfg.parameters.get('workers',0),save_dir=str(folder/'training'))
         output=folder/'artifact'; output.mkdir(exist_ok=True); shutil.copy2(weights/'best.pt',output/'best.pt')
     else:
@@ -336,7 +347,7 @@ def evaluate(ident,dataset,device,folder):
         sample={'image_id':row['image_id'],'group':row['group'],'truth':int(row['label_state']=='positive')}
         try:
             result,jpeg=predictor.predict(inside(row['image_path']).read_bytes())
-            sample.update(prediction=result['binary_prediction'],status=result['status'],score=result['prediction_score'],elapsed_ms=result['elapsed_ms'],boxes=result['boxes'],quality=result['quality'])
+            sample.update(prediction=result['binary_prediction'],status=result['status'],score=result['prediction_score'],elapsed_ms=result['elapsed_ms'],boxes=result['boxes'],quality=result['quality'],source_size=result.get('source_size'),annotated_size=result.get('annotated_size'),coordinate_system='prediction: source pixels; truth: normalized YOLO xywh; preview: EXIF corrected')
             from PIL import ImageDraw
             rendered=Image.open(io.BytesIO(jpeg)).convert('RGB');draw=ImageDraw.Draw(rendered)
             truth_boxes=[list(map(float,line.split())) for line in inside(row['label_path']).read_text().splitlines() if line.strip()]

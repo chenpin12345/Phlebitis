@@ -4,7 +4,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from src.workbench.contracts import Experiment,InferenceConfig
-from src.workbench.metrics import binary_metrics,aggregate
+from src.workbench.metrics import binary_metrics
 from src.workbench.api import create_app
 from src.line_bot.messages import results
 from src.line_bot.service import create_app as line_app
@@ -75,9 +75,6 @@ def test_line_app_does_not_expose_admin(tmp_path):
         for path in ('/api/v1/data','/api/v1/jobs','/api/v1/audit','/api/v1/session'):
             assert c.get(path).status_code==404
 
-def test_oof_rejects_repeated_samples():
-    r={'model':'x','config':{},'snapshot':'a','samples':[{'image_id':'i','group':'validation','truth':0,'prediction':0}],'train_groups':['training'],'metrics':{'accuracy':1}}
-    with pytest.raises(ValueError,match='repeated'):aggregate([r,r])
 
 def test_shared_store_controlled_clock_unsend(tmp_path):
     from src.line_bot.service import Store

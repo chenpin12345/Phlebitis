@@ -8,8 +8,9 @@ import time
 import uuid
 import psutil
 from src.common import ROOT, read_json, write_json
-from src.workbench.storage import db, audit, file_lock
+from src.workbench.storage import db, audit, file_lock, operator
 from src.workbench.contracts import Experiment
+from src.workbench.resources import guarded, require_active, states, ResourceUnavailable
 
 JOBS=ROOT/'runs/workbench/jobs'
 TERMINAL={'succeeded','failed','cancelled','interrupted'}
@@ -28,15 +29,19 @@ def get(ident):
         item[name]=read_json(path) if path.exists() else None
     return item
 
-def listing(limit=200):
-    with db() as con: ids=[r[0] for r in con.execute('SELECT id FROM jobs ORDER BY created DESC'+(' LIMIT ?' if limit is not None else ''),((limit,) if limit is not None else ()))]
+def listing(limit=200,include_trashed=False):
+    clause='' if include_trashed else " WHERE NOT EXISTS (SELECT 1 FROM resource_lifecycle r WHERE r.type='job' AND r.id=jobs.id AND r.state!='active')"
+    with db() as con: ids=[r[0] for r in con.execute('SELECT id FROM jobs'+clause+' ORDER BY created DESC,id DESC'+(' LIMIT ?' if limit is not None else ''),((limit,) if limit is not None else ()))]
     return [get(i) for i in ids]
 
+@guarded
 def enqueue(kind,config,idem=None):
     if kind not in {'train','evaluate','prepare','predict','regression'}: raise ValueError('Unsupported job kind')
+    config=dict(config)
     if kind=='train':
         cfg=Experiment(**config)
         if cfg.resume_job:
+            require_active('job',cfg.resume_job)
             old=get(cfg.resume_job)
             if old['state'] not in {'cancelled','interrupted','failed'}: raise ValueError('Resume requires an interrupted job')
             old_cfg=Experiment(**old['config'])
@@ -46,6 +51,27 @@ def enqueue(kind,config,idem=None):
             checkpoint=folder(cfg.resume_job)/('training/weights/last.pt' if cfg.model.startswith('yolo') else 'last.pt')
             if not checkpoint.is_file(): raise ValueError('No complete checkpoint; start a new experiment')
         config=cfg.model_dump()
+    if idem:
+        with db() as con:
+            gone=con.execute('SELECT * FROM deleted_job_keys WHERE idem=?',(idem,)).fetchone()
+            existing=con.execute('SELECT id,kind,config FROM jobs WHERE idem=?',(idem,)).fetchone()
+        if gone:
+            from src.workbench.storage import digest
+            check=dict(config)
+            if kind=='regression':check.pop('baseline_job',None)
+            if gone['kind']!=kind or gone['fingerprint']!=digest(check):raise ValueError('Idempotency key already used for different work')
+            raise ResourceUnavailable('job',gone['id'],'purged')
+        if existing:
+            old_config=json.loads(existing['config']);check=dict(old_config)
+            if kind=='regression' and 'baseline_job' not in config:check.pop('baseline_job',None)
+            if existing['kind']!=kind or check!=config:raise ValueError('Idempotency key already used for different work')
+            return get(existing['id'])
+    for field in ('artifact','initial_artifact'):
+        if config.get(field):require_active('model',config[field])
+    if kind=='regression' and 'baseline_job' not in config:
+        candidates=[j for j in listing(limit=None) if j['kind']=='regression' and j['state']=='succeeded' and (folder(j['id'])/'regression.json').is_file()]
+        config['baseline_job']=candidates[0]['id'] if candidates else None
+    if config.get('baseline_job'):require_active('job',config['baseline_job'])
     ident=uuid.uuid4().hex; idem=idem or ident
     with db() as con:
         con.execute('BEGIN IMMEDIATE')
@@ -55,9 +81,9 @@ def enqueue(kind,config,idem=None):
             con.commit()
             return get(old['id'])
         path=folder(ident); path.mkdir(parents=True)
-        write_json(path/'request.json',{'id':ident,'kind':kind,'config':config})
+        write_json(path/'request.json',{'id':ident,'kind':kind,'config':config,'actor':operator.get()})
         now=time.time()
-        con.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)',(ident,idem,kind,'queued',json.dumps(config),now,now,None,None,None))
+        con.execute('INSERT INTO jobs(id,idem,kind,state,config,created,updated,pid,born,error) VALUES(?,?,?,?,?,?,?,?,?,?)',(ident,idem,kind,'queued',json.dumps(config),now,now,None,None,None))
     audit('enqueue',{'job':ident,'kind':kind,'config':config})
     return get(ident)
 
@@ -68,6 +94,10 @@ def update(ident,state,error=None,**process):
         allowed={'queued':{'running','cancelled','failed'},'running':{'running','cancelling','cancelled','failed','interrupted','succeeded'},'cancelling':{'cancelled','interrupted','failed'}}
         if state!=row[0] and state not in allowed.get(row[0],set()): raise ValueError(f'Invalid transition {row[0]} -> {state}')
         con.execute('UPDATE jobs SET state=?,updated=?,error=?,pid=COALESCE(?,pid),born=COALESCE(?,born) WHERE id=?',(state,time.time(),error,process.get('pid'),process.get('born'),ident))
+    if state!=row[0]:
+        request=folder(ident)/'request.json'
+        actor=read_json(request).get('actor') if request.exists() else None
+        audit('job_'+state,{'job':ident,'from':row[0],'state':state,'error':error},actor=actor,outcome=state)
 
 def cancel(ident):
     item=get(ident)
@@ -108,7 +138,7 @@ class Manager:
         if time.time()-self.last_cleanup>30:
             from src.workbench.lifecycle import expire_temporary
             expire_temporary();self.last_cleanup=time.time()
-        jobs=listing(limit=None); active=[]
+        jobs=listing(limit=None,include_trashed=True); active=[]
         from src.workbench.simulation import reconcile
         reconcile(jobs)
         for item in jobs:

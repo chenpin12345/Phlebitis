@@ -118,7 +118,7 @@ def withdraw(ident):
 def expire_temporary():
     """Automatic expiry is limited to newly created ephemeral simulation media."""
     from src.workbench.jobs import listing,folder
-    jobs=listing(limit=None);active={j['config'].get('asset') for j in jobs if j['state'] in ('queued','running','cancelling')}
+    jobs=listing(limit=None,include_trashed=True);active={j['config'].get('asset') for j in jobs if j['state'] in ('queued','running','cancelling')}
     with db() as con:
         rows=con.execute("SELECT * FROM assets WHERE category='simulation' AND expires<=?",(time.time(),)).fetchall()
         for row in rows:

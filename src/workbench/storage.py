@@ -6,10 +6,12 @@ import os
 import sqlite3
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from src.common import ROOT, write_json
 
 HOME = ROOT / 'runtime/workbench'
+operator = ContextVar('workbench_operator', default=None)
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
@@ -38,6 +40,21 @@ def file_lock(path: Path):
             else: fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 @contextmanager
+def dataset_lock(root=ROOT):
+    """Serialize reads and writes of manifest/annotations with a bounded wait."""
+    deadline=time.monotonic()+5
+    while True:
+        lock=file_lock(root/'runtime/data.lock')
+        try:
+            lock.__enter__()
+            break
+        except RuntimeError:
+            if time.monotonic()>=deadline: raise
+            time.sleep(.02)
+    try: yield
+    finally: lock.__exit__(None,None,None)
+
+@contextmanager
 def db(home=HOME):
     home.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(home / 'workbench.sqlite3', timeout=15)
@@ -52,6 +69,8 @@ def db(home=HOME):
     CREATE TABLE IF NOT EXISTS cases(id TEXT PRIMARY KEY, revision INTEGER, data TEXT);
     CREATE TABLE IF NOT EXISTS flags(id TEXT PRIMARY KEY, data TEXT);
     ''')
+    from src.workbench.migrations import migrate
+    migrate(con, home)
     try:
         yield con
         con.commit()
@@ -59,9 +78,12 @@ def db(home=HOME):
         con.rollback(); raise
     finally: con.close()
 
-def audit(action, detail, home=HOME):
+def audit(action, detail, home=HOME, *, actor=None, outcome=None):
+    detail = dict(detail)
+    detail['_audit'] = {'schema_version':2, 'outcome':outcome or ('submitted' if action=='enqueue' else 'succeeded'), 'identity':'self_declared' if actor or operator.get() else 'unrecorded'}
+    from src.workbench.views import redact
     with db(home) as con:
-        con.execute('INSERT INTO audit(at,actor,action,detail) VALUES(?,?,?,?)', (time.time(), 'local_operator', action, json.dumps(detail, ensure_ascii=False)))
+        con.execute('INSERT INTO audit(at,actor,action,detail) VALUES(?,?,?,?)', (time.time(), actor or operator.get() or 'local_operator', action, json.dumps(redact(detail), ensure_ascii=False)))
 
 def flag(key, value=None):
     with db() as con:

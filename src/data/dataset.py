@@ -50,7 +50,10 @@ def audit(root: Path = ROOT) -> dict:
     return {"images": len(rows), "statuses": dict(Counter(r["status"] for r in rows)), "approved_labels": dict(Counter(r["label_state"] for r in rows if r["status"]=="approved")), "errors": errors, "warnings": warnings}
 
 
-def _review(image_id: str, *, status: str, label: str, reviewer: str, reason: str, subject_id: str = "", annotation: str = "", category: str = "", clear_subject: bool = False, root: Path = ROOT) -> dict:
+def _review(image_id: str, *, status: str, label: str, reviewer: str, reason: str, subject_id: str = "", annotation: str = "", category: str = "", clear_subject: bool = False, decision=None, coordinate_resolution=None, root: Path = ROOT) -> dict:
+    from src.workbench.views import DECISIONS
+    decision = decision or {'approved':'approve','excluded':'exclude','pending_review':'needs_changes'}.get(status)
+    if DECISIONS.get(decision)!=status: raise ValueError('審查決定與資料狀態不一致')
     rows = read_manifest(root)
     r = next((r for r in rows if r["image_id"] == image_id), None)
     if r is None or not reviewer.strip() or not reason.strip():
@@ -58,6 +61,7 @@ def _review(image_id: str, *, status: str, label: str, reviewer: str, reason: st
     if status not in {"approved", "pending_review", "excluded"}:
         raise ValueError("Invalid status")
     old = dict(r)
+    old_annotation = {k:v for k,v in read_json(inside(r['annotation_path'],root)).items() if k!='imageData'} if r.get('annotation_path') and inside(r['annotation_path'],root).is_file() else None
     src = inside(r["image_path"], root)
     ann = inside(annotation, root) if annotation else (inside(r["annotation_path"], root) if r["annotation_path"] else None)
     boxes = []
@@ -124,7 +128,7 @@ def _review(image_id: str, *, status: str, label: str, reviewer: str, reason: st
         r.update(subject_id=subject_id, group_verified="true")
     elif clear_subject:r.update(subject_id='',group_verified='false')
     write_manifest(rows, root)
-    write_json(root / f"data/reviews/{stamp()}_{image_id}.json", {"before": old, "after": r})
+    write_json(root / f"data/reviews/{stamp()}_{image_id}.json", {"schema_version":2,"before": old, "after": r,"decision":decision,"source":"self_declared_operator","coordinate_resolution":coordinate_resolution,"annotation_before":old_annotation,"annotation_after":read_json(inside(ann_path,root)) if ann_path else None})
     return r
 
 
@@ -137,7 +141,10 @@ def _build(*, demo: bool = False, root: Path = ROOT, folds: int = 3, seed: int =
         raise ValueError("Dataset audit failed: " + "; ".join(report["errors"]))
     if report["warnings"] and not demo:
         raise ValueError("Patient identifiers are not verified. Review manifest first, or explicitly use --demo for workflow validation only.")
-    rows = [r for r in read_manifest(root) if r["status"] == "approved"]
+    from src.workbench.views import data_rows
+    eligible = data_rows(root)
+    review_revisions = {r['image_id']:r['review']['revision'] if r['review'] else None for r in eligible}
+    rows = [r for r in read_manifest(root) if any(x['image_id']==r['image_id'] and x['training_eligible'] for x in eligible)]
     groups = [r["subject_id"] if r["group_verified"]=="true" else "candidate:"+(r["candidate_group"] or r["image_id"]) for r in rows]
     labels = [int(r["label_state"] == "positive") for r in rows]
     if len(set(groups)) < folds or min(Counter(labels).values(), default=0) < folds or len(set(labels)) < 2:
@@ -172,7 +179,7 @@ def _build(*, demo: bool = False, root: Path = ROOT, folds: int = 3, seed: int =
                     normalized = ImageOps.exif_transpose(im).convert("RGB")
                     normalized.save(ip, format="JPEG", quality=95)
                 lp.write_text(text(orient_boxes(boxes, orientation)), encoding="utf-8")
-                members[split].append({"image_id": r["image_id"], "sha256": r["sha256"], "dataset_sha256": sha256(ip), "source_label_sha256": sha256(source_label), "normalization": "exif_transpose_rgb_jpeg95", "label_sha256": sha256(lp), "image_path": ip.relative_to(root).as_posix(), "label_path": lp.relative_to(root).as_posix(), "group": groups[int(i)], "label_state": r["label_state"]})
+                members[split].append({"review_revision":review_revisions[r["image_id"]],"image_id": r["image_id"], "sha256": r["sha256"], "dataset_sha256": sha256(ip), "source_label_sha256": sha256(source_label), "normalization": "exif_transpose_rgb_jpeg95", "label_sha256": sha256(lp), "image_path": ip.relative_to(root).as_posix(), "label_path": lp.relative_to(root).as_posix(), "group": groups[int(i)], "label_state": r["label_state"]})
         dataset = {"path": str(target.resolve()), "train": "images/train", "val": "images/val", "names": {0: "phlebitis"}}
         (target / "dataset.yaml").write_text(yaml.safe_dump(dataset, allow_unicode=True), encoding="utf-8")
         fold_info = {"schema_version": 2, "fold": fold, "dataset": (target / "dataset.yaml").relative_to(root).as_posix(), "members": members, "demo_only": demo, "manifest_digest": manifest_digest}
@@ -237,10 +244,10 @@ def latest_dataset(fold: int = 0, root: Path = ROOT) -> Path:
 
 
 def build(*, demo=False, root=ROOT, folds=3, seed=42):
-    from src.workbench.storage import file_lock
+    from src.workbench.storage import dataset_lock
     if not 2 <= folds <= 10:
         raise ValueError("Fold count must be 2..10")
-    with file_lock(root / "runtime/data.lock"):
+    with dataset_lock(root):
         recover_reviews(root)
         return _build(demo=demo, root=root, folds=folds, seed=seed)
 
@@ -264,8 +271,8 @@ def recover_reviews(root=ROOT):
 
 
 def review(image_id, *, revision=None, root=ROOT, **kwargs):
-    from src.workbench.storage import file_lock, digest
-    with file_lock(root / "runtime/data.lock"):
+    from src.workbench.storage import dataset_lock, digest
+    with dataset_lock(root):
         recover_reviews(root)
         rows = read_manifest(root)
         row = next((r for r in rows if r["image_id"] == image_id), None)

@@ -1,0 +1,46 @@
+{
+  "training_started": false,
+  "scheduler_started": false,
+  "counts": {
+    "all": 91,
+    "reviewed": 0,
+    "pending_review": 62,
+    "approved": 24,
+    "excluded": 5
+  },
+  "views": {
+    "approved": {
+      "total": 24,
+      "matches_overview": true
+    },
+    "pending_review": {
+      "total": 62,
+      "matches_overview": true
+    },
+    "excluded": {
+      "total": 5,
+      "matches_overview": true
+    },
+    "reviewed": {
+      "total": 0,
+      "matches_overview": true
+    },
+    "all": {
+      "total": 91,
+      "matches_overview": true
+    }
+  },
+  "artifact_count": 6,
+  "curve_sources": 15,
+  "active_jobs": 0,
+  "model_load": {
+    "artifact": "yolo11n_23eff4760fee46bd",
+    "device": "cpu",
+    "class_names": {
+      "0": "phlebitis"
+    },
+    "passed": true
+  },
+  "artifact_detail_readable": true,
+  "export_preserves_inference": true
+}
