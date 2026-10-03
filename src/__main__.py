@@ -32,8 +32,19 @@ def main():
     p.add_argument("source");p.add_argument("--device",default="0");p.add_argument("--allow-demo",action="store_true")
     p=sub.add_parser("serve",help="啟動本地 LINE webhook");p.add_argument("--port",type=int,default=8000)
     p=sub.add_parser("menu",help="產生 LINE 圖文選單素材；只有 --publish 才寫入帳號");p.add_argument("--publish",action="store_true")
+    p=sub.add_parser('imports',help='研究照片與模型匯入（不使用 legacy migrate）')
+    p.add_argument('action',choices=['scan','commit','status','retry']);p.add_argument('--kind',choices=['photos','models']);p.add_argument('--batch');p.add_argument('--id');p.add_argument('--key')
+    p.add_argument('--page',type=int,default=1);p.add_argument('--size',type=int,default=30)
     args=parser.parse_args()
     os.chdir(ROOT)
+    if args.command=='imports':
+        from src.imports import service
+        if args.action=='scan' and (not args.kind or not args.batch):parser.error('imports scan 需要 --kind 與 --batch')
+        if args.action!='scan' and not args.id:parser.error('此匯入操作需要 --id')
+        if args.action=='scan':result=service.preview(ROOT,args.kind,args.batch)
+        elif args.action=='status':result=service.load(ROOT,args.id)
+        else:result=service.commit(ROOT,args.id,args.key or ('import:'+args.id),retry=args.action=='retry')
+        print(json.dumps(service.public(result,args.page,args.size),ensure_ascii=False,indent=2));return 1 if result['state']=='failed' else 0
     if args.command=="workbench":
         import uvicorn
         from src.workbench.api import create_app

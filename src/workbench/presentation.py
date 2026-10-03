@@ -10,11 +10,13 @@ from src.workbench.views import redact
 from src.workbench.storage import digest
 
 def legacy_sources(root=ROOT):
-    folders={p.parent for pattern in ('results.csv','results.png') for p in (root/'runs').rglob(pattern) if 'workbench' not in p.relative_to(root/'runs').parts}
-    return {'legacy_'+digest(p.relative_to(root).as_posix())[:20]:p for p in sorted(folders)}
+    from src.workbench.queries.legacy import sources
+    return sources(root)
+
 
 def curve_sources(root=ROOT):
-    items=[{'id':j['id'],'model':j['config'].get('model'),'state':j['state'],'created':j['created'],'label':j['id']} for j in jobs.listing(limit=None) if j['kind']=='train']
+    with jobs.db() as con:rows=con.execute("SELECT id,state,created,json_extract(config,'$.model') model FROM jobs WHERE kind='train' AND NOT EXISTS (SELECT 1 FROM resource_lifecycle r WHERE r.type='job' AND r.id=jobs.id AND r.state!='active') ORDER BY created DESC,id DESC").fetchall()
+    items=[{**dict(r),'label':r['id']} for r in rows]
     items.extend({'id':ident,'model':None,'state':'historical','created':None,'label':p.relative_to(root/'runs').as_posix()} for ident,p in legacy_sources(root).items())
     return items
 
@@ -33,14 +35,15 @@ def curve_image(ident,root=ROOT):
     return path
 
 def history(path):
+    from src.workbench.queries.curves import lines
     result=[]
-    if path.exists():
-        for line in path.read_text(encoding='utf-8',errors='replace').splitlines():
-            try:
-                record=json.loads(line)
-                if isinstance(record,dict): result.append(record)
-            except (ValueError,TypeError): pass # An active writer may not have finished its last line.
+    for line in lines(path):
+        try:
+            record=json.loads(line)
+            if isinstance(record,dict):result.append(record)
+        except (ValueError,TypeError):pass
     return result
+
 
 def finite(value):
     try:
@@ -65,8 +68,9 @@ def metric_history(folder, *, model='', epochs=None):
     if raw: source='progress.jsonl'
     if csv_path.exists():
         source='results.csv'
-        with csv_path.open(encoding='utf-8-sig',newline='') as stream:
-            for r in csv.DictReader(stream):
+        from src.workbench.queries.curves import lines
+        if True:
+            for r in csv.DictReader(lines(csv_path)):
                 r={str(k).strip():v for k,v in r.items() if k is not None}
                 raw.append((r.pop('epoch',None),r))
     # CSV rows appended last override progress for the same epoch. Finite recorded values only.
@@ -118,7 +122,9 @@ def artifact_detail(ident):
         files.append(row)
     requested=None
     try: requested=jobs.get(meta.get('experiment') or '')['config']
-    except (ValueError,FileNotFoundError): pass
+    except (ValueError,FileNotFoundError):
+        from src.workbench.resources import record
+        requested=(record('job',meta.get('experiment') or '').get('summary') or {}).get('config')
     reports=registry.reports(ident)
     status=next((m.get('evaluation_status') for m in registry.listing() if m['id']==ident),None)
     return redact({'metadata':meta,'task':MODELS.get(meta.get('model'),{}).get('task'), 'files':files,

@@ -1,0 +1,150 @@
+[
+  {
+    "path": "src/training/runner.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/adapters.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/api.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/jobs.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/lifecycle.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/managed_files.py",
+    "change": "added"
+  },
+  {
+    "path": "src/workbench/metrics.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/migrations.py",
+    "change": "added"
+  },
+  {
+    "path": "src/workbench/presentation.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/registry.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/report_views.py",
+    "change": "added"
+  },
+  {
+    "path": "src/workbench/resources.py",
+    "change": "added"
+  },
+  {
+    "path": "src/workbench/simulation.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/storage.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/trash.py",
+    "change": "added"
+  },
+  {
+    "path": "src/workbench/views.py",
+    "change": "modified"
+  },
+  {
+    "path": "src/workbench/worker.py",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/comparison.tsx",
+    "change": "added"
+  },
+  {
+    "path": "web/src/dialog.tsx",
+    "change": "added"
+  },
+  {
+    "path": "web/src/extras.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/main.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/maintenance.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/monitor.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/readable.tsx",
+    "change": "added"
+  },
+  {
+    "path": "web/src/review.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/style.css",
+    "change": "modified"
+  },
+  {
+    "path": "web/src/trash.tsx",
+    "change": "added"
+  },
+  {
+    "path": "web/src/ui.tsx",
+    "change": "modified"
+  },
+  {
+    "path": "tests/test_lifecycle.py",
+    "change": "modified"
+  },
+  {
+    "path": "tests/test_trash.py",
+    "change": "added"
+  },
+  {
+    "path": "tests/test_workbench.py",
+    "change": "modified"
+  },
+  {
+    "path": "tests/test_workbench_acceptance.py",
+    "change": "modified"
+  },
+  {
+    "path": "tests/workbench_fixture.py",
+    "change": "modified"
+  },
+  {
+    "path": "docs/TRASH_IMPLEMENTATION.md",
+    "change": "added"
+  },
+  {
+    "path": "docs/TRASH_REQUIREMENTS.md",
+    "change": "added"
+  },
+  {
+    "path": "docs/WORKBENCH.md",
+    "change": "modified"
+  },
+  {
+    "path": "docs/WORKBENCH_ACCEPTANCE.md",
+    "change": "modified"
+  }
+]

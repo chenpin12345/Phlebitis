@@ -20,3 +20,12 @@ docs/*.docx
 web/node_modules/
 web/dist/
 web/test-results/
+
+# Manual research imports and derived runtime state
+inbox/**
+!inbox/photos/
+!inbox/models/
+!inbox/**/README.md
+!runtime/cache/
+!runtime/imports/
+!runtime/**/README.md

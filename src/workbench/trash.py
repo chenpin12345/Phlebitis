@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from src.common import read_json, write_json
 from src.workbench import jobs, registry, resources, managed_files
-from src.workbench.storage import digest, operator
+from src.workbench.storage import digest, operator, file_lock
 from src.workbench.views import date_bounds, redact
 
 
@@ -35,6 +35,31 @@ class ReferenceRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     revision: str
     indices: list[int] = Field(min_length=1,max_length=100)
+
+
+class PreviewResponse(BaseModel):
+    model_config=ConfigDict(extra='allow')
+    id: str
+    state: Literal['calculating','ready','failed','expired','consumed']
+
+
+class OperationResponse(BaseModel):
+    model_config=ConfigDict(extra='allow')
+    id: str
+    action: Literal['move','restore','purge']
+    state: Literal['preparing','running','completed','partial_failed','needs_check']
+    result: list[dict]
+    steps: list[dict]
+    removed_files: int
+    removed_logical_bytes: int
+
+
+class TrashListResponse(BaseModel):
+    model_config=ConfigDict(extra='allow')
+    items: list[dict]
+    total: int
+    page: int
+    size: int
 
 
 def dump(value): return json.dumps(value,ensure_ascii=False,allow_nan=False)
@@ -83,13 +108,23 @@ def reference_chains():
 
 def dependencies(kind, ident, item):
     blockers=[];relations=[];warnings=[]
-    if kind=='audit':return blockers,relations,['永久刪除後不再保留原稽核事件內容；另留最小刪除摘要與管理事件。']
+    if kind=='audit':
+        operation_id=item.get('detail',{}).get('operation')
+        if operation_id:
+            with jobs.db() as con:op=con.execute('SELECT state FROM trash_operations WHERE id=?',(operation_id,)).fetchone()
+            if op and op['state']!='completed':blockers.append('此稽核仍屬於未完成的管理操作，必須保留。')
+        return blockers,relations,['永久刪除後不再保留原稽核事件內容；另留最小刪除摘要與管理事件。']
     all_jobs=jobs.listing(limit=None,include_trashed=True)
     if kind=='job' and item['state'] not in jobs.TERMINAL:
         blockers.append('工作尚未終止：'+item['state']+'；請先停止並等待終止狀態。')
+    if kind=='job' and jobs.owned_process(item):blockers.append('工作程序仍在執行或結束整理中，請等待程序退出。')
     for j in all_jobs:
         cfg=j['config']; fields=('artifact','initial_artifact') if kind=='model' else ('resume_job','baseline_job','experiment','evaluation_job','regression_job')
         hits=[k for k in fields if cfg.get(k)==ident]
+        if kind=='model' and cfg.get('checkpoint_import'):
+            from src.imports.service import load as load_import
+            imported=load_import(jobs.ROOT,cfg['checkpoint_import'])
+            if imported['items'][0].get('artifact')==ident:hits.append('checkpoint_import')
         if hits:
             active=j['state'] not in jobs.TERMINAL
             relations.append({'type':'job','id':j['id'],'state':j['state'],'relation':hits,'required':active})
@@ -283,18 +318,39 @@ def public_plan(plan):
     return redact(result)
 
 
-def operation(ident):
+def operation(ident,page=1,size=100):
+    if page<1 or not 1<=size<=100:raise ValueError('無效的操作紀錄分頁')
     with jobs.db() as con: row=con.execute('SELECT * FROM trash_operations WHERE id=?',(ident,)).fetchone()
     if not row:raise ValueError('刪除操作不存在')
     item=dict(row);item.pop('fingerprint');item.pop('idem')
     item['plan']=public_plan(json.loads(item['plan']));item['result']=json.loads(item['result'])
+    for entry in item['plan']['items']:
+        for field in ('files','retained'):
+            entry[field+'_count']=len(entry[field]);entry[field]=entry[field][(page-1)*size:page*size]
+    for entry in item['result']:
+        retained=entry.get('retained',[]);entry['retained_count']=len(retained);entry['retained']=retained[(page-1)*size:page*size]
     with jobs.db() as con:
-        steps=[dict(r) for r in con.execute('SELECT type,resource,path,state,bytes,error FROM trash_steps WHERE operation=? ORDER BY type,resource,path',(ident,))]
+        stats=con.execute("SELECT COUNT(*),SUM(state='removed'),SUM(CASE WHEN state='removed' THEN bytes ELSE 0 END) FROM trash_steps WHERE operation=?",(ident,)).fetchone()
+        steps=[dict(r) for r in con.execute('SELECT type,resource,path,state,bytes,error FROM trash_steps WHERE operation=? ORDER BY type,resource,path LIMIT ? OFFSET ?',(ident,size,(page-1)*size))]
     item['steps']=steps
-    item['removed_files']=sum(s['state']=='removed' for s in steps)
-    item['removed_logical_bytes']=sum(s['bytes'] or 0 for s in steps if s['state']=='removed')
+    item['step_count'],item['removed_files'],item['removed_logical_bytes']=stats[0],stats[1] or 0,stats[2] or 0
+    item['page']=page;item['size']=size
     item['disk_reclaimed_bytes']=None
     return redact(item)
+
+
+def operation_lease(ident):
+    if len(ident)!=32 or any(c not in '0123456789abcdef' for c in ident):raise ValueError('無效操作 ID')
+    return file_lock(jobs.JOBS.parent/'maintenance-leases'/(ident+'.lock'))
+
+
+def operation_history(page=1,size=30):
+    if page<1 or not 1<=size<=100:raise ValueError('無效的操作分頁')
+    with jobs.db() as con:
+        total=con.execute('SELECT COUNT(*) FROM trash_operations').fetchone()[0]
+        page=min(page,max(1,(total+size-1)//size))
+        items=[dict(r) for r in con.execute('SELECT id,action,state,created,updated,actor FROM trash_operations ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(size,(page-1)*size))]
+    return redact({'items':items,'page':page,'size':size,'total':total})
 
 
 class Maintenance:
@@ -304,14 +360,22 @@ class Maintenance:
         self.closed=False
 
     def recover(self):
-        with resources.resource_lock(),jobs.db() as con:
-            con.execute("UPDATE trash_operations SET state='needs_check',updated=? WHERE state IN ('preparing','running')",(time.time(),))
-            con.execute("UPDATE resource_lifecycle SET state='needs_check' WHERE state='purging'")
-            con.execute("UPDATE trash_previews SET state='expired' WHERE state='calculating'")
+        with resources.resource_lock():
+            with jobs.db() as con:
+                pending=[r['id'] for r in con.execute("SELECT id FROM trash_operations WHERE state IN ('preparing','running')")]
+            for ident in pending:
+                lease=operation_lease(ident)
+                try:lease.__enter__()
+                except RuntimeError:continue  # Another process still owns this operation.
+                try:
+                    with jobs.db() as con:
+                        con.execute("UPDATE trash_operations SET state='needs_check',updated=? WHERE id=? AND state IN ('preparing','running')",(time.time(),ident))
+                        con.execute("UPDATE resource_lifecycle SET state='needs_check' WHERE state='purging' AND operation=?",(ident,))
+                finally:lease.__exit__(None,None,None)
 
     def close(self):
         self.closed=True
-        self.pool.shutdown(wait=True,cancel_futures=True)
+        self.pool.shutdown(wait=True,cancel_futures=False)
 
     def preview(self,body):
         targets=[t.model_dump() for t in body.targets]
@@ -382,6 +446,24 @@ class Maintenance:
         if action not in ('move','restore','purge'):raise ValueError('此預覽不可提交至垃圾桶操作')
         if plan['blocked']:raise ValueError('存在硬性阻擋，請明確調整選取範圍並重新預覽')
         if body.confirmation!=plan['confirmation']:raise ValueError('確認文字不符')
+        # Hash scans stay outside lifecycle/SQLite locks. Reserve only after a
+        # second short state/dependency/handle check; execution rehashes each file.
+        for expected in plan['items']:
+            try:current=inspect_target(expected,action)
+            except (ValueError,FileNotFoundError):
+                with jobs.db() as con:repeated=con.execute('SELECT id,fingerprint FROM trash_operations WHERE idem=?',(idem,)).fetchone()
+                if repeated:
+                    if repeated['fingerprint']!=fingerprint:raise ValueError('冪等鍵已用於其他操作')
+                    return operation(repeated['id'])
+                raise
+            if digest(stable(current))!=digest(stable(expected)) or current['blockers']:
+                # Another request with this same key may have committed while
+                # this request was scanning outside the reservation lock.
+                with jobs.db() as con:repeated=con.execute('SELECT id,fingerprint FROM trash_operations WHERE idem=?',(idem,)).fetchone()
+                if repeated:
+                    if repeated['fingerprint']!=fingerprint:raise ValueError('冪等鍵已用於其他操作')
+                    return operation(repeated['id'])
+                raise ValueError('預覽後內容、狀態或相依性已變更，請重新預覽')
         # Compute owners include LINE and older CLI consumers that do not expose a DB lease.
         from contextlib import nullcontext
         from src.lock import OperationLock
@@ -392,15 +474,21 @@ class Maintenance:
             if old:
                 if old['fingerprint']!=fingerprint:raise ValueError('冪等鍵已用於其他操作')
                 return operation(old['id'])
+            if row['expires']<time.time():raise ValueError('預覽已到期，請重新產生預覽')
             for expected in plan['items']:
-                current=inspect_target(expected,action)
-                if digest(stable(current))!=digest(stable(expected)) or current['blockers']:
+                life=resources.record(expected['type'],expected['id'])
+                source,root=get_resource(expected['type'],expected['id'])
+                blocks,relations,warnings=dependencies(expected['type'],expected['id'],source)
+                if life['revision']!=expected['revision'] or life['state']!=expected['resource_state'] or digest(source)!=expected['source_fingerprint'] or blocks or relations!=expected['relations']:
                     raise ValueError('預覽後內容、狀態或相依性已變更，請重新預覽')
+                for f in expected['files']+expected['retained']:
+                    if f.get('identity'):managed_files.verify_stat(root/f['path'],root,f['identity'])
             ident=uuid.uuid4().hex;now=time.time();actor=operator.get()
             with jobs.db() as con:
                 con.execute('BEGIN IMMEDIATE')
+                initial_result=[] if action=='purge' else [{'type':i['type'],'id':i['id'],'state':'succeeded'} for i in plan['items']]
                 con.execute('INSERT INTO trash_operations(id,idem,fingerprint,action,state,created,updated,actor,plan,result) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                            (ident,idem,fingerprint,action,'preparing',now,now,actor,dump(plan),'[]'))
+                            (ident,idem,fingerprint,action,'preparing' if action=='purge' else 'completed',now,now,actor,dump(plan),dump(initial_result)))
                 for item in plan['items']:
                     state='purging' if action=='purge' else 'trashed' if action=='move' else 'active'
                     con.execute('''INSERT INTO resource_lifecycle(type,id,state,revision,moved,actor,summary,capacity,operation) VALUES(?,?,?,?,?,?,?,?,?)
@@ -418,10 +506,27 @@ class Maintenance:
                 results=[{'type':i['type'],'id':i['id'],'state':'succeeded'} for i in plan['items']]
                 with jobs.db() as con:con.execute('UPDATE trash_operations SET state=?,result=?,updated=? WHERE id=?',('completed',dump(results),time.time(),ident))
                 jobs.audit('trash_'+action+'_completed',{'operation':ident,'targets':plan['targets']},actor=actor)
-            else:self.pool.submit(self.execute,ident)
+            else:
+                lease=operation_lease(ident);lease.__enter__()
+                try:self.pool.submit(self.execute,ident,lease)
+                except BaseException:
+                    lease.__exit__(None,None,None)
+                    raise
         return operation(ident)
 
-    def execute(self,ident):
+    def execute(self,ident,lease=None):
+        if lease is None:
+            lease=operation_lease(ident)
+            try:lease.__enter__()
+            except RuntimeError:return
+        try:
+            with jobs.db() as con:
+                row=con.execute('SELECT state FROM trash_operations WHERE id=?',(ident,)).fetchone()
+            if not row or row['state']!='preparing':return
+            self._execute(ident)
+        finally:lease.__exit__(None,None,None)
+
+    def _execute(self,ident):
         try:
             with jobs.db() as con:
                 row=con.execute('SELECT * FROM trash_operations WHERE id=?',(ident,)).fetchone()
@@ -445,6 +550,8 @@ class Maintenance:
                         if failures and f['path']=='artifact.json':continue
                         try:
                             with resources.resource_lock():
+                                life=resources.record(*key)
+                                if life['state']!='purging' or life['operation']!=ident:raise ValueError('資源刪除預留已變更')
                                 blocks,_,_=dependencies(*key,item['source'])
                                 if blocks:raise ValueError('；'.join(blocks))
                                 path=Path(item['root'])/f['path']
@@ -457,17 +564,33 @@ class Maintenance:
                             failures.append(f['path']+'：'+str(exc))
                             with jobs.db() as con:con.execute('UPDATE trash_steps SET state=?,error=? WHERE operation=? AND type=? AND resource=? AND path=?',('failed',str(exc),ident,*key,f['path']))
                     if not failures:
-                        with resources.resource_lock(),jobs.db() as con:
-                            con.execute('BEGIN IMMEDIATE')
-                            if key[0]=='job':
-                                source=item['source']
-                                original_config=dict(source['config'])
-                                if source['kind']=='regression':original_config.pop('baseline_job',None)
-                                con.execute('INSERT OR IGNORE INTO deleted_job_keys(idem,id,kind,fingerprint) VALUES(?,?,?,?)',
-                                            (source['idem'],key[1],source['kind'],digest(original_config)))
-                                con.execute('DELETE FROM jobs WHERE id=?',(key[1],))
-                            elif key[0]=='audit':con.execute('DELETE FROM audit WHERE id=?',(int(key[1]),))
-                            con.execute('UPDATE resource_lifecycle SET state=?,revision=revision+1,capacity=NULL WHERE type=? AND id=?',('purged',*key))
+                        with resources.resource_lock():
+                            life=resources.record(*key)
+                            blocks,_,_=dependencies(*key,item['source'])
+                            if blocks or life['operation']!=ident or life['state']!='purging':raise ValueError('刪除預留或依賴已變更，需人工檢查')
+                            with jobs.db() as con:
+                                con.execute('BEGIN IMMEDIATE')
+                                if key[0]=='job':
+                                    source=item['source']
+                                    original_config=dict(source['config'])
+                                    if source['kind']=='regression':original_config.pop('baseline_job',None)
+                                    original_request=read_json(jobs.folder(key[1])/'request.json')
+                                    request_fingerprint=original_request.get('request_fingerprint') or digest(original_config)
+                                    con.execute('INSERT OR IGNORE INTO deleted_job_keys(idem,id,kind,fingerprint) VALUES(?,?,?,?)',
+                                                (source['idem'],key[1],source['kind'],request_fingerprint))
+                                    con.execute('DELETE FROM jobs WHERE id=?',(key[1],))
+                                elif key[0]=='audit':con.execute('DELETE FROM audit WHERE id=?',(int(key[1]),))
+                                con.execute('UPDATE resource_lifecycle SET state=?,revision=revision+1,capacity=NULL WHERE type=? AND id=?',('purged',*key))
+                                if key[0]=='audit':
+                                    # Preview/operation caches must not retain a second copy
+                                    # of a permanently deleted event's original detail.
+                                    for table in ('trash_previews','trash_operations'):
+                                        for cached in con.execute('SELECT id,plan FROM '+table).fetchall():
+                                            saved=json.loads(cached['plan']);changed=False
+                                            for entry in saved.get('items',[]):
+                                                if entry['type']=='audit' and entry['id']==key[1] and 'source' in entry:
+                                                    entry.pop('source');changed=True
+                                            if changed:con.execute('UPDATE '+table+' SET plan=? WHERE id=?',(dump(saved),cached['id']))
                     else:
                         with jobs.db() as con:con.execute('UPDATE resource_lifecycle SET state=? WHERE type=? AND id=?',('partial_failed',*key))
                 except Exception as exc:
@@ -484,13 +607,19 @@ class Maintenance:
                 con.execute("UPDATE resource_lifecycle SET state='needs_check' WHERE operation=? AND state='purging'",(ident,))
 
     def retry(self,ident):
-        with resources.resource_lock(),jobs.db() as con:
-            row=con.execute('SELECT state,action FROM trash_operations WHERE id=?',(ident,)).fetchone()
-            if not row or row['action']!='purge' or row['state'] not in ('partial_failed','needs_check'):raise ValueError('此操作目前不可重試')
-            con.execute('UPDATE trash_operations SET state=?,updated=? WHERE id=?',('preparing',time.time(),ident))
-            con.execute("UPDATE resource_lifecycle SET state='purging' WHERE operation=? AND state IN ('partial_failed','needs_check')",(ident,))
-        jobs.audit('trash_retry',{'operation':ident},outcome='submitted')
-        self.pool.submit(self.execute,ident)
+        with resources.resource_lock():
+            lease=operation_lease(ident);lease.__enter__()
+            try:
+                with jobs.db() as con:
+                    row=con.execute('SELECT state,action FROM trash_operations WHERE id=?',(ident,)).fetchone()
+                    if not row or row['action']!='purge' or row['state'] not in ('partial_failed','needs_check'):raise ValueError('此操作目前不可重試')
+                    con.execute('UPDATE trash_operations SET state=?,updated=? WHERE id=?',('preparing',time.time(),ident))
+                    con.execute("UPDATE resource_lifecycle SET state='purging' WHERE operation=? AND state IN ('partial_failed','needs_check')",(ident,))
+                jobs.audit('trash_retry',{'operation':ident},outcome='submitted')
+                self.pool.submit(self.execute,ident,lease)
+            except BaseException:
+                lease.__exit__(None,None,None)
+                raise
         return operation(ident)
 
     def reference_preview(self,target,body):

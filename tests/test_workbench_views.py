@@ -170,6 +170,9 @@ def test_corrupt_approved_data_not_counted_as_trainable(app):
     c,root,_=app
     row=next(r for r in read_manifest(root) if r['image_id']=='a_landscape')
     (root/row['yolo_path']).write_text('0 4 4 1 1')
+    # External mutations are discovered by the monitor; reads never run a full audit.
+    from src.workbench.queries import data_index
+    data_index.invalidate(root);data_index.rebuild(root)
     overview=c.get('/api/v1/overview').json()
     available=c.get('/api/v1/data-query?view=approved').json()
     pending=c.get('/api/v1/data-query?view=pending_review&size=100').json()

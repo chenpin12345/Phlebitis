@@ -13,6 +13,14 @@ from src.common import ROOT, write_json
 HOME = ROOT / 'runtime/workbench'
 operator = ContextVar('workbench_operator', default=None)
 
+class TimedConnection(sqlite3.Connection):
+    def execute(self,*args,**kwargs):
+        from src.telemetry import measure
+        with measure('sql'):return super().execute(*args,**kwargs)
+    def executemany(self,*args,**kwargs):
+        from src.telemetry import measure
+        with measure('sql'):return super().executemany(*args,**kwargs)
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
@@ -42,6 +50,7 @@ def file_lock(path: Path):
 @contextmanager
 def dataset_lock(root=ROOT):
     """Serialize reads and writes of manifest/annotations with a bounded wait."""
+    started=time.perf_counter()
     deadline=time.monotonic()+5
     while True:
         lock=file_lock(root/'runtime/data.lock')
@@ -51,26 +60,36 @@ def dataset_lock(root=ROOT):
         except RuntimeError:
             if time.monotonic()>=deadline: raise
             time.sleep(.02)
+    from src.telemetry import current
+    metrics=current.get()
+    if metrics is not None:metrics['dataset_lock']={'ms':(time.perf_counter()-started)*1000,'calls':1}
     try: yield
     finally: lock.__exit__(None,None,None)
 
 @contextmanager
 def db(home=HOME):
     home.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(home / 'workbench.sqlite3', timeout=15)
+    from src.telemetry import measure
+    with measure('db_connect'):
+        con = sqlite3.connect(home / 'workbench.sqlite3', timeout=15,factory=TimedConnection)
     con.row_factory = sqlite3.Row
-    con.execute('PRAGMA journal_mode=WAL')
-    con.executescript('''
-    CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, idem TEXT UNIQUE, kind TEXT, state TEXT, config TEXT, created REAL, updated REAL, pid INTEGER, born REAL, error TEXT);
-    CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL, actor TEXT, action TEXT, detail TEXT);
-    CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, session TEXT, message TEXT, status TEXT, payload TEXT, updated REAL);
-    CREATE TABLE IF NOT EXISTS tombstones(session TEXT, message TEXT, expires REAL, PRIMARY KEY(session,message));
-    CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, category TEXT, path TEXT, created REAL, expires REAL, metadata TEXT);
-    CREATE TABLE IF NOT EXISTS cases(id TEXT PRIMARY KEY, revision INTEGER, data TEXT);
-    CREATE TABLE IF NOT EXISTS flags(id TEXT PRIMARY KEY, data TEXT);
-    ''')
-    from src.workbench.migrations import migrate
-    migrate(con, home)
+    if con.execute('PRAGMA user_version').fetchone()[0]<3:
+        con.execute('PRAGMA journal_mode=WAL')
+        con.executescript('''
+        CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, idem TEXT UNIQUE, kind TEXT, state TEXT, config TEXT, created REAL, updated REAL, pid INTEGER, born REAL, error TEXT);
+        CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL, actor TEXT, action TEXT, detail TEXT);
+        CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, session TEXT, message TEXT, status TEXT, payload TEXT, updated REAL);
+        CREATE TABLE IF NOT EXISTS tombstones(session TEXT, message TEXT, expires REAL, PRIMARY KEY(session,message));
+        CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, category TEXT, path TEXT, created REAL, expires REAL, metadata TEXT);
+        CREATE TABLE IF NOT EXISTS cases(id TEXT PRIMARY KEY, revision INTEGER, data TEXT);
+        CREATE TABLE IF NOT EXISTS flags(id TEXT PRIMARY KEY, data TEXT);
+        ''')
+        from src.workbench.migrations import migrate
+        migrate(con, home)
+        from src.workbench.query_migration import migrate as migrate_queries
+        migrate_queries(con, home)
+        from src.workbench.report_migration import migrate as migrate_reports
+        migrate_reports(con,home)
     try:
         yield con
         con.commit()
@@ -88,6 +107,6 @@ def audit(action, detail, home=HOME, *, actor=None, outcome=None):
 def flag(key, value=None):
     with db() as con:
         if value is not None:
-            con.execute('INSERT OR REPLACE INTO flags VALUES(?,?)', (key, json.dumps(value, ensure_ascii=False)))
+            con.execute('INSERT OR REPLACE INTO flags(id,data) VALUES(?,?)', (key, json.dumps(value, ensure_ascii=False)))
         row = con.execute('SELECT data FROM flags WHERE id=?', (key,)).fetchone()
         return json.loads(row[0]) if row else None

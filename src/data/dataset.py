@@ -10,11 +10,12 @@ from src.common import ROOT, inside, read_json, read_manifest, rows_digest, sha2
 from src.data.labels import from_labelme, text, validate, orient_boxes
 
 
-def audit(root: Path = ROOT) -> dict:
+def audit(root: Path = ROOT, on_progress=None) -> dict:
     rows = read_manifest(root)
     errors, warnings = [], []
     seen, ids = {}, set()
-    for r in rows:
+    for index,r in enumerate(rows):
+        if on_progress and index%25==0:on_progress(index,len(rows))
         ident = r["image_id"]
         try:
             image = inside(r["image_path"], root)
@@ -47,6 +48,7 @@ def audit(root: Path = ROOT) -> dict:
                     warnings.append(f"{ident}: subject identity unverified; formal evaluation blocked")
         except (ValueError, OSError, KeyError, TypeError) as exc:
             errors.append(f"{ident}: {exc}")
+    if on_progress:on_progress(len(rows),len(rows))
     return {"images": len(rows), "statuses": dict(Counter(r["status"] for r in rows)), "approved_labels": dict(Counter(r["label_state"] for r in rows if r["status"]=="approved")), "errors": errors, "warnings": warnings}
 
 

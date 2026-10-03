@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 from src.workbench.contracts import Experiment,InferenceConfig
 from src.workbench.metrics import binary_metrics
-from src.workbench.api import create_app
 from src.line_bot.messages import results
 from src.line_bot.service import create_app as line_app
 from test_line import FakePredictor,FakeLine,settings,post,event,until
@@ -62,8 +61,10 @@ def test_model_specific_parameter_contracts():
     assert e.inference.imgsz==224 and 'letterbox224' in e.inference.preprocess
     with pytest.raises(ValueError):Experiment(**base,inference={'candidate_threshold':.9,'threshold':.5})
 
-def test_admin_host_origin_and_csrf():
-    with TestClient(create_app(testing=True)) as c:
+def test_admin_host_origin_and_csrf(tmp_path,monkeypatch):
+    from workbench_fixture import configure
+    app,_=configure(tmp_path,monkeypatch)
+    with TestClient(app) as c:
         token=c.get('/api/v1/session').json()['csrf']
         assert c.post('/api/v1/experiments',json={}).status_code==403
         assert c.get('/api/v1/session',headers={'host':'evil.example'}).status_code==400

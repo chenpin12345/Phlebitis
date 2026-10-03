@@ -59,14 +59,14 @@ def test_migration_reentrant_audit_ids_never_reused(tmp_path):
     path=tmp_path/'workbench.sqlite3'
     with sqlite3.connect(path) as con:
         con.execute('CREATE TABLE audit(id INTEGER PRIMARY KEY,at REAL,actor TEXT,action TEXT,detail TEXT)')
-        con.execute("INSERT INTO audit VALUES(99,1,NULL,'legacy','{}')")
+        con.execute("INSERT INTO audit(id,at,actor,action,detail) VALUES(99,1,NULL,'legacy','{}')")
     with storage.db(tmp_path) as con:
         assert con.execute('SELECT id FROM audit').fetchone()[0]==99
         con.execute('DELETE FROM audit WHERE id=99')
     with storage.db(tmp_path) as con:
         con.execute("INSERT INTO audit(at,actor,action,detail) VALUES(2,NULL,'new','{}')")
         assert con.execute('SELECT id FROM audit').fetchone()[0]==100
-        assert con.execute('PRAGMA user_version').fetchone()[0]==1
+        assert con.execute('PRAGMA user_version').fetchone()[0]==3
     assert (tmp_path/'backups/before-trash-v1.sqlite3').exists()
 
 
@@ -222,8 +222,10 @@ def test_partial_failure_retry_and_recovery(app,monkeypatch):
     assert resources.record('job',ident)['state']=='partial_failed'
     assert preview(c,'restore',[{'type':'job','id':ident}])['blocked']
     monkeypatch.setattr(managed_files,'remove_verified',original)
+    extra=jobs.folder(ident)/'new-file-outside-approved-plan.bin';extra.write_bytes(b'preserve')
     assert c.post('/api/v1/trash/operations/'+op['id']+'/retry').status_code==200
     assert wait(c,'/api/v1/trash/operations/'+op['id'])['state']=='completed'
+    assert extra.read_bytes()==b'preserve'
 
 
 def test_baseline_selected_from_active_jobs_only(app):
@@ -241,7 +243,160 @@ def test_report_query_preserves_repeat_evaluations_and_image_membership(app):
         write_json(root/'runs/workbench/evaluations'/ident/'report.json',{'artifact':a['id'],'model':'yolo11n' if n<2 else 'dinov2_small','snapshot':'fixed','fold':0,'metrics':{'complete':True,'member_hash':'same'},'samples':[{'image_id':'sample','truth':1}],'evaluated_at':str(n)})
     result=c.get('/api/v1/reports-query?model=yolo11n&size=1').json()
     assert result['total']==2 and len(result['items'])==1
+    assert result['items'][0]['source_job_state']=='unrecorded'
     assert c.get('/api/v1/reports-query?model=yolo11').json()['total']==0
     assert c.get('/api/v1/reports/'+'7'*32+'/images/not-a-member').status_code==400
     assert c.get('/api/v1/reports/'+'7'*32+'/images/sample').status_code==404
     assert c.post('/api/v1/reports/oof',json={}).status_code in (404,405)
+
+
+def test_active_operation_lease_and_orphan_restart(app):
+    _,_,_=app
+    ident=uuid.uuid4().hex
+    with jobs.db() as con:
+        con.execute('INSERT INTO trash_operations(id,idem,fingerprint,action,state,created,updated,plan,result) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (ident,ident,'test','purge','running',1,1,'{"items":[]}','[]'))
+    maintenance=trash.Maintenance('restart-test')
+    try:
+        with trash.operation_lease(ident):
+            maintenance.recover()
+            assert trash.operation(ident)['state']=='running'
+        maintenance.recover()
+        assert trash.operation(ident)['state']=='needs_check'
+        # Restart never automatically starts destructive work.
+        maintenance.recover()
+        assert trash.operation(ident)['state']=='needs_check'
+    finally:maintenance.close()
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows handle deletion')
+def test_missing_after_intent_is_not_claimed_as_success(app,monkeypatch):
+    c,_,_=app;ident=terminal_job();do(c,'move','job',ident)
+    original=managed_files.remove_verified
+    def interrupted(path,root,identity,intent):
+        original(path,root,identity,intent)
+        raise OSError('simulated crash after delete, before result journal')
+    monkeypatch.setattr(managed_files,'remove_verified',interrupted)
+    op=do(c,'purge','job',ident)
+    assert op['state']=='partial_failed' and op['removed_files']==0
+    monkeypatch.setattr(managed_files,'remove_verified',original)
+    c.post('/api/v1/trash/operations/'+op['id']+'/retry')
+    result=wait(c,'/api/v1/trash/operations/'+op['id'])
+    assert result['state']=='partial_failed' and result['removed_files']==0
+    assert '沒有確認完成紀錄' in result['steps'][0]['error']
+    assert resources.record('job',ident)['state']!='purged'
+
+
+def test_audit_purge_removes_cached_original_detail(app):
+    c,_,_=app
+    with jobs.db() as con:
+        row=con.execute('INSERT INTO audit(at,actor,action,detail) VALUES(?,?,?,?)',(1,'tester','fixture','{"note":"unique-original-event-body"}'))
+        ident=str(row.lastrowid)
+    do(c,'move','audit',ident);do(c,'purge','audit',ident)
+    with jobs.db() as con:
+        for table in ('trash_previews','trash_operations'):
+            assert all('unique-original-event-body' not in r[0] for r in con.execute('SELECT plan FROM '+table))
+    assert resources.record('audit',ident)['summary']['action']=='fixture'
+
+
+def test_live_terminal_process_and_active_management_audit_blocked(app,monkeypatch):
+    c,_,_=app;ident=terminal_job()
+    monkeypatch.setattr(jobs,'owned_process',lambda item:object() if item['id']==ident else None)
+    assert preview(c,'move',[{'type':'job','id':ident}])['blocked']
+    op=uuid.uuid4().hex
+    with jobs.db() as con:
+        con.execute('INSERT INTO trash_operations(id,idem,fingerprint,action,state,created,updated,plan,result) VALUES(?,?,?,?,?,?,?,?,?)',(op,op,'test','purge','needs_check',1,1,'{"items":[]}','[]'))
+        row=con.execute('INSERT INTO audit(at,actor,action,detail) VALUES(?,?,?,?)',(1,'tester','trash_retry',json.dumps({'operation':op})))
+        audit_id=str(row.lastrowid)
+    assert preview(c,'move',[{'type':'audit','id':audit_id}])['blocked']
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows junction protection')
+def test_junction_never_followed(app):
+    import subprocess
+    c,root,a=app;do(c,'move','model',a['id'])
+    outside=root/'protected';outside.mkdir();(outside/'keep.bin').write_bytes(b'keep')
+    link=registry.artifact_path(a['id'])/'junction'
+    result=subprocess.run(['cmd','/c','mklink','/J',str(link),str(outside)],capture_output=True)
+    assert result.returncode==0,result.stderr
+    try:
+        plan=preview(c,'purge',[{'type':'model','id':a['id']}])
+        assert plan['blocked']
+        assert all('keep.bin' not in f['path'] for f in plan['items'][0]['files'])
+        assert (outside/'keep.bin').read_bytes()==b'keep'
+    finally:os.rmdir(link)
+
+
+def test_operation_steps_pagination_and_true_aggregate(app):
+    c,_,_=app;ident=uuid.uuid4().hex
+    with jobs.db() as con:
+        con.execute('INSERT INTO trash_operations(id,idem,fingerprint,action,state,created,updated,plan,result) VALUES(?,?,?,?,?,?,?,?,?)',(ident,ident,'test','purge','completed',1,1,'{"items":[]}','[]'))
+        for n in range(105):
+            con.execute('INSERT INTO trash_steps(operation,type,resource,path,state,identity,bytes) VALUES(?,?,?,?,?,?,?)',(ident,'job','0'*32,f'{n:03}.bin','removed','{}',2))
+    first=c.get('/api/v1/trash/operations/'+ident+'?page=1').json()
+    second=c.get('/api/v1/trash/operations/'+ident+'?page=2').json()
+    assert len(first['steps'])==100 and len(second['steps'])==5
+    assert first['removed_files']==second['removed_files']==105
+    assert second['removed_logical_bytes']==210
+
+
+def test_session_binding_validation_does_not_echo_inputs(app):
+    c,_,a=app;p=preview(c,'move',[{'type':'model','id':a['id']}])
+    other=trash.Maintenance('different-session')
+    try:
+        with pytest.raises(ValueError):other.get_preview(p['id'])
+    finally:other.close()
+    r=c.post('/api/v1/trash/previews',json={'action':'invalid','targets':[],'secret':'do-not-echo'})
+    assert r.status_code==422 and 'do-not-echo' not in r.text
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows managed deletion')
+def test_deleted_resume_retry_reports_original_deleted_job(app):
+    c,_,_=app
+    old=jobs.enqueue('train',{'model':'efficientnet_b0','dataset':'fixture','device':'cpu'})
+    jobs.cancel(old['id']);(jobs.folder(old['id'])/'last.pt').write_bytes(b'synthetic-checkpoint')
+    config={**old['config'],'resume_job':old['id']}
+    resumed=jobs.enqueue('train',config,'resume-identity');jobs.cancel(resumed['id'])
+    do(c,'move','job',resumed['id']);do(c,'purge','job',resumed['id'])
+    do(c,'move','job',old['id']);do(c,'purge','job',old['id'])
+    with pytest.raises(resources.ResourceUnavailable) as error:jobs.enqueue('train',config,'resume-identity')
+    assert error.value.ident==resumed['id'] and error.value.state=='purged'
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows managed deletion')
+def test_deleted_regression_preserves_exact_caller_fingerprint(app):
+    c,_,a=app;baseline=terminal_job('regression',{'artifact':a['id']})
+    config={'artifact':a['id'],'baseline_job':baseline}
+    item=jobs.enqueue('regression',config,'explicit-baseline');jobs.cancel(item['id'])
+    do(c,'move','job',item['id']);do(c,'purge','job',item['id'])
+    with pytest.raises(resources.ResourceUnavailable):jobs.enqueue('regression',config,'explicit-baseline')
+    with pytest.raises(ValueError,match='different work'):jobs.enqueue('regression',{**config,'baseline_job':None},'explicit-baseline')
+
+
+@pytest.mark.parametrize('action',['move',pytest.param('purge',marks=pytest.mark.skipif(os.name!='nt',reason='Windows deletion'))])
+def test_duplicate_commit_during_scan_returns_same_operation(app,monkeypatch,action):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    c,_,_=app;ident=terminal_job()
+    if action=='purge':do(c,'move','job',ident)
+    p=preview(c,action,[{'type':'job','id':ident}])
+    inspected=trash.inspect_target;entered=threading.Event();release=threading.Event()
+    def delayed(target,action):
+        if threading.current_thread().name.startswith('duplicate'):
+            entered.set();assert release.wait(10)
+        return inspected(target,action)
+    monkeypatch.setattr(trash,'inspect_target',delayed)
+    # Both callers have passed the initial idempotency lookup before caller one
+    # publishes its operation; caller two sees changed resource state in scan.
+    with jobs.db() as con:session=con.execute('SELECT session FROM trash_previews WHERE id=?',(p['id'],)).fetchone()[0]
+    maintenance=trash.Maintenance(session);body=trash.CommitRequest(preview_id=p['id'],confirmation=p.get('confirmation',''))
+    try:
+        with ThreadPoolExecutor(max_workers=1,thread_name_prefix='duplicate') as pool:
+            future=pool.submit(maintenance.commit,body,'concurrent-key');assert entered.wait(10)
+            try:
+                first=maintenance.commit(body,'concurrent-key')
+                if action=='purge':assert wait(c,'/api/v1/trash/operations/'+first['id'])['state']=='completed'
+            finally:release.set()
+            other=future.result(timeout=10)
+        assert first['id']==other['id']
+    finally:maintenance.close()

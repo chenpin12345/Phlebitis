@@ -44,8 +44,11 @@ def train(dataset: Path, *, config: Path, epochs: int | None = None, batch: int 
     if base.name != "yolo11n.pt":
         raise ValueError("This project is fixed to YOLO11n.")
     with OperationLock():
+        from src.workbench.resources import check_managed_path
+        check_managed_path(base)
         if resume:
             resume = inside(resume)
+            check_managed_path(resume)
             out = resume.parent.parent
             record = read_json(out / "experiment.json")
             if record["split"]["manifest_digest"] != split["manifest_digest"]:
@@ -96,11 +99,13 @@ def evaluate(weights: Path, dataset: Path, *, device: str = "0", confidence: flo
     weights=inside(weights)
     out=ROOT/"runs"/("evaluation_"+stamp())
     out.mkdir(parents=True)
-    model=YOLO(str(weights))
-    validate_model(model)
     if device != "cpu" and not torch.cuda.is_available():
         raise ValueError("CUDA unavailable; CPU must be requested explicitly")
     with OperationLock():
+        from src.workbench.resources import check_managed_path
+        check_managed_path(weights)
+        model=YOLO(str(weights))
+        validate_model(model)
         metrics=model.val(data=str(dataset),device=device,imgsz=inference.imgsz,batch=4,workers=0,conf=0.001,iou=inference.iou,plots=True,project=str(out),name="validation")
         samples=[]
         errors=out/"error_examples"
@@ -146,6 +151,8 @@ def select(weights: Path, evaluation: Path, confidence: float = 0.5) -> dict:
         raise ValueError("Evaluation must use the training run validation fold")
     validate_split(inside(experiment["dataset"]))
     with OperationLock():
+        from src.workbench.resources import check_managed_path
+        check_managed_path(weights)
         selected=ROOT/"models/selected"
         selected.mkdir(parents=True,exist_ok=True)
         metadata={"model_family":"YOLO11n","model_version":weights.parent.parent.name,"weights_sha256":sha256(weights),"confidence":confidence,"demo_only":experiment["demo_only"],"evaluation":str(evaluation.relative_to(ROOT)),"selected_at":stamp(),"severity_supported":False}

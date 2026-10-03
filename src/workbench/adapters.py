@@ -35,6 +35,7 @@ def prepare(model, folder):
     progress(folder,'preparing_weights',model=model)
     if model=='dinov2_small':
         dest=PRETRAINED/model
+        freshly_downloaded=not (dest/'model.safetensors').exists()
         if not (dest/'model.safetensors').exists():
             from huggingface_hub import snapshot_download, HfApi
             revision=HfApi().model_info(MODELS[model]['source']).sha
@@ -43,8 +44,10 @@ def prepare(model, folder):
             write_json(dest/'source.json',{'source':MODELS[model]['source'],'revision':revision})
         files={p.name:sha256(p) for p in dest.iterdir() if p.suffix in ('.safetensors','.json') and p.name!='provenance.json'}
         write_json(dest/'provenance.json',{'files':files,'source':MODELS[model]['source']})
+        if freshly_downloaded:write_json(ROOT/'runtime/imports/trusted-official'/(model+'.json'),{'source':MODELS[model]['source'],'files':{p.name:sha256(p) for p in dest.iterdir() if p.name in ('config.json','model.safetensors')},'revision':revision})
         return dest
     dest=PRETRAINED/(model+('.pt' if model.startswith('yolo') else '.pth'))
+    freshly_downloaded=not dest.exists()
     if not dest.exists():
         temporary=dest.with_suffix('.download')
         def report(block,size,total):
@@ -72,6 +75,8 @@ def prepare(model, folder):
                 progress(folder,'retrying_download',attempt=attempt+2)
         temporary.replace(dest)
     write_json(dest.with_suffix('.source.json'),{'source':MODELS[model]['source'],'sha256':sha256(dest),'prepared':stamp()})
+    if freshly_downloaded:
+        write_json(ROOT/'runtime/imports/trusted-official'/(model+'.json'),{'source':MODELS[model]['source'],'files':{dest.name:sha256(dest)},'prepared':stamp()})
     return dest
 
 def device_name(value):
@@ -133,7 +138,7 @@ def efficient_train(cfg, split, folder, base):
     scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,cfg.epochs) if params.get('scheduler','none')=='cosine' else None
     start=0; best=float('inf'); stale=0
     if cfg.resume_job:
-        checkpoint=torch.load(ROOT/'runs/workbench/jobs'/cfg.resume_job/'last.pt',map_location=device,weights_only=True)
+        checkpoint=torch.load(resume_folder(cfg)/'last.pt',map_location=device,weights_only=True)
         model.load_state_dict(checkpoint['model']); optimizer.load_state_dict(checkpoint['optimizer'])
         if scheduler and checkpoint.get('scheduler'): scheduler.load_state_dict(checkpoint['scheduler'])
         start=checkpoint['epoch']; best=checkpoint['best']; stale=checkpoint['stale']
@@ -143,7 +148,7 @@ def efficient_train(cfg, split, folder, base):
     write_json(folder/'effective.json',effective)
     output=folder/'artifact'; output.mkdir(exist_ok=True)
     if cfg.resume_job:
-        oldbest=ROOT/'runs/workbench/jobs'/cfg.resume_job/'artifact/model.pt'
+        oldbest=resume_folder(cfg)/'artifact/model.pt'
         if oldbest.exists(): shutil.copy2(oldbest,output/'model.pt')
         selection=oldbest.parent.parent/'checkpoint_selection.json'
         if selection.exists(): shutil.copy2(selection,folder/'checkpoint_selection.json')
@@ -225,7 +230,7 @@ def yolo_train(cfg,split,folder,base):
         prior=get(cfg.initial_artifact)
         if prior['model']!=cfg.model: raise ValueError('Fine-tune model family mismatch')
         base=artifact_path(cfg.initial_artifact)/'best.pt'
-    if cfg.resume_job: base=ROOT/'runs/workbench/jobs'/cfg.resume_job/'training/weights/last.pt'
+    if cfg.resume_job: base=resume_folder(cfg)/'training/weights/last.pt'
     model=yolo_api()(str(base))
     def callback(trainer):
         if (folder/'cancel').exists(): trainer.stop=True
@@ -246,9 +251,9 @@ def yolo_train(cfg,split,folder,base):
         # Installed Ultralytics explicitly permits save_dir during resume.
         # Keep optimizer/checkpoint state but never overwrite the prior experiment.
         weights=folder/'training/weights'; weights.mkdir(parents=True,exist_ok=True)
-        previous=ROOT/'runs/workbench/jobs'/cfg.resume_job/'training/weights/best.pt'
+        previous=resume_folder(cfg)/'training/weights/best.pt'
         if previous.exists():shutil.copy2(previous,weights/'best.pt')
-        selection=ROOT/'runs/workbench/jobs'/cfg.resume_job/'checkpoint_selection.json'
+        selection=resume_folder(cfg)/'checkpoint_selection.json'
         if selection.exists():shutil.copy2(selection,folder/'checkpoint_selection.json')
         model.train(resume=True,device=cfg.device,workers=cfg.parameters.get('workers',0),save_dir=str(folder/'training'))
         output=folder/'artifact'; output.mkdir(exist_ok=True); shutil.copy2(weights/'best.pt',output/'best.pt')
@@ -268,7 +273,7 @@ def train(cfg: Experiment, folder):
     if split['demo_only'] and not cfg.demo: raise ValueError('未核對個案，必須明確勾選研究展示模式。')
     for subset in ('train','val'):
         if {r['label_state'] for r in split['members'][subset]} != {'positive','negative'}: raise ValueError('Both classes required in each split')
-    base=prepare(cfg.model,folder)
+    base=prepare(cfg.model,folder) if not cfg.base_import else imported_base(cfg)
     write_json(folder/'experiment.json',{'requested':cfg.model_dump(),'split':split,'source':MODELS[cfg.model]['source'],'prepared_hash':sha256(base) if base.is_file() else sha256(base/'model.safetensors')})
     fn=yolo_train if cfg.model.startswith('yolo') else efficient_train if cfg.model=='efficientnet_b0' else dino_train
     return fn(cfg,split,folder,base)
@@ -277,7 +282,9 @@ class ModelPredictor:
     def __init__(self,ident,device='cpu'):
         import torch
         from src.workbench.registry import get,artifact_path
-        self.metadata=get(ident); self.path=artifact_path(ident); self.device=device_name(device); self.raw_device=device
+        self.metadata=get(ident)
+        if self.metadata.get('extra',{}).get('purpose')=='checkpoint':raise ValueError('Checkpoint 不是推論模型')
+        self.path=artifact_path(ident); self.device=device_name(device); self.raw_device=device
         self.config=read_json(ROOT/'configs/service.json'); self.policy=InferenceConfig(**self.metadata['config'])
         self.kind=self.metadata['model']; self.task=MODELS[self.kind]['task']
         if self.task=='detection':
@@ -379,3 +386,43 @@ def evaluate(ident,dataset,device,folder):
 
 def code_version():
     return digest({str(p.relative_to(ROOT)):sha256(p) for p in (ROOT/'src').rglob('*.py')})
+
+
+def prepare_verified(model,folder):
+    """Explicit prepare uses a fresh official download to establish provenance.
+
+    This runs only in a dedicated worker process while holding the compute lock.
+    Existing official files are never overwritten on a different hash.
+    """
+    global PRETRAINED
+    original=PRETRAINED
+    verification=folder/'official_verification'
+    try:
+        PRETRAINED=verification
+        downloaded=prepare(model,folder)
+    finally:PRETRAINED=original
+    destination=original/downloaded.name
+    if not destination.exists():
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        if downloaded.is_dir():shutil.copytree(downloaded,destination)
+        else:shutil.copy2(downloaded,destination)
+    elif downloaded.is_file() and sha256(downloaded)!=sha256(destination):
+        raise ValueError('既有基礎權重與本次官方下載不同；已保留既有檔案，請核對來源')
+    elif downloaded.is_dir():
+        expected={p.relative_to(downloaded).as_posix():sha256(p) for p in downloaded.rglob('*') if p.is_file()}
+        actual={p.relative_to(destination).as_posix():sha256(p) for p in destination.rglob('*') if p.is_file()}
+        if expected!=actual:raise ValueError('既有基礎權重目錄與官方下載不同；已保留既有檔案')
+    return destination
+
+
+def imported_base(cfg):
+    from src.imports.service import resolve_package
+    path,package=resolve_package(ROOT,cfg.base_import,'base',cfg.model)
+    return path if cfg.model=='dinov2_small' else path/next(iter(package['files']))
+
+def resume_folder(cfg):
+    if not cfg.checkpoint_import:return ROOT/'runs/workbench/jobs'/cfg.resume_job
+    from src.imports.service import resolve_package
+    path,package=resolve_package(ROOT,cfg.checkpoint_import,'checkpoint',cfg.model)
+    if package['source']['id']!=cfg.resume_job:raise ValueError('Checkpoint 原工作不相符')
+    return path

@@ -8,6 +8,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.telemetry import timed
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,6 +26,7 @@ def stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
+@timed('hash')
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -32,6 +35,7 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+@timed('file_read')
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 

@@ -9,12 +9,13 @@ def main(ident):
     path=jobs.folder(ident); request=read_json(path/'request.json'); config=request['config']
     from src.workbench.storage import operator
     operator.set(request.get('actor'))
+    state='failed'; error=None
     try:
         with OperationLock():
             adapters.check_cancel(path)
             kind=request['kind']
             if kind=='prepare':
-                output=adapters.prepare(config['model'],path); result={'path':str(output.relative_to(ROOT))}
+                output=adapters.prepare_verified(config['model'],path); result={'path':str(output.relative_to(ROOT))}
             elif kind=='train':
                 cfg=Experiment(**config)
                 output,effective=adapters.train(cfg,path)
@@ -39,18 +40,21 @@ def main(ident):
                 from src.workbench.simulation import run_regression
                 result=run_regression(config,path)
             write_json(path/'result.json',result)
-        if jobs.get(ident)['state']=='cancelling': jobs.update(ident,'cancelled')
-        else: jobs.update(ident,'succeeded')
-    except adapters.Cancelled as exc: jobs.update(ident,'cancelled',str(exc))
+        state='cancelled' if jobs.get(ident)['state']=='cancelling' else 'succeeded'
+    except adapters.Cancelled as exc: state='cancelled'; error=str(exc)
     except BaseException as exc:
         traceback.print_exc()
-        jobs.update(ident,'failed',type(exc).__name__+': '+str(exc))
+        error=type(exc).__name__+': '+str(exc)
     finally:
         try:
             from src.workbench.trash import seal_job
             from src.workbench.resources import resource_lock
-            with resource_lock():seal_job(ident)
+            seal_job(ident)
+            with resource_lock():
+                if jobs.get(ident)['state']=='cancelling' and state=='succeeded':state='cancelled'
+                jobs.update(ident,state,error)
         except Exception:
             traceback.print_exc()
+            jobs.update(ident,'failed','無法完成產物歸屬紀錄；請檢查工作日誌')
 
 if __name__=='__main__': main(sys.argv[1])

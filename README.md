@@ -4,6 +4,8 @@
 
 ## 啟動網頁工作台
 
+本輪新增功能與維護方式：[效能、資料夾與安全匯入](docs/PERFORMANCE_IMPORTS.md)。照片放入 `inbox/photos/<批次>/`，模型包放入 `inbox/models/<模型包>/`，再由網頁或 CLI 預覽確認；不要直接修改正式 manifest。量測與驗證見 [效能驗收紀錄](docs/PERFORMANCE_RESULTS.md)。
+
 雙擊 **啟動研究工作台.cmd**，開啟 **http://127.0.0.1:8765**。這不會自動訓練，也不需要 LINE 金鑰。
 
 ```powershell

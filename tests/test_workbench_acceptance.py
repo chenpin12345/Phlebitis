@@ -155,11 +155,13 @@ def test_config_clone_has_no_old_evaluation(tmp_path,monkeypatch):
     assert registry.reports(old['id']) and registry.reports(new['id'])==[]
 
 
-def test_invalid_compare_batch_never_partially_enqueues(monkeypatch):
+def test_invalid_compare_batch_never_partially_enqueues(tmp_path,monkeypatch):
     from fastapi.testclient import TestClient
     from src.workbench import api,jobs
+    from workbench_fixture import configure
+    app,_=configure(tmp_path,monkeypatch)
     calls=[];monkeypatch.setattr(jobs,'enqueue',lambda *a,**k:calls.append(a))
-    with TestClient(api.create_app(testing=True)) as c:
+    with TestClient(app) as c:
         headers={'x-csrf-token':c.get('/api/v1/session').json()['csrf']}
         result=c.post('/api/v1/experiments/batch',headers=headers,json=[
             {'model':'yolo11n','dataset':'same'},

@@ -14,7 +14,7 @@ async function imagePoint(x,y){return page.locator('svg.annotation').evaluate((s
 async function drag(x1,y1,x2,y2){const a=await imagePoint(x1,y1),b=await imagePoint(x2,y2);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:6});await page.mouse.up()}
 try{
  await page.goto(base);await page.getByRole('heading',{name:'讓每一次分析，都有依據。'}).waitFor();
- await page.getByLabel('操作者（自行填寫）',{exact:true}).fill('瀏覽器測試');
+ await page.goto(base+'/#settings');await page.getByLabel('操作者（自行填寫）',{exact:true}).fill('瀏覽器測試');
  for(const view of ['approved','pending_review','excluded']){
   await page.goto(base+'/#data?view=reviewed&reviewer=unmatched');
   await page.getByRole('link',{name:'總覽 研究流程與目前狀態'}).click();
@@ -56,7 +56,7 @@ try{
  const artifact=page.locator('.artifact-details');await expect(artifact.locator('pre')).toHaveCount(0);await artifact.getByRole('button',{name:'查看設定',exact:true}).click();await artifact.getByRole('heading',{name:'設定檔：settings.json'}).waitFor();await expect(artifact.locator('pre')).toHaveCount(0);await expect(artifact).toContainText('[已遮罩]');await expect(artifact).not.toContainText('fixture-secret');
  const downloadPromise=page.waitForEvent('download');await artifact.getByRole('link',{name:'下載',exact:true}).click();const download=await downloadPromise;expect(download.suggestedFilename()).toBe('best.pt');
  const exportPromise=page.waitForEvent('download');await artifact.getByRole('link',{name:'匯出原始設定',exact:true}).last().click();expect((await exportPromise).suggestedFilename()).toBe('model-settings.json');
- await screenshot('artifact-readable');await artifact.getByText('進階：原始設定',{exact:true}).click();await expect(artifact.locator('pre')).toHaveCount(1);check('artifact tables, settings, weight download, explicit raw export and advanced view');
+ await screenshot('artifact-readable');await artifact.getByText('產物指紋與登錄明細',{exact:true}).click();await expect(artifact.locator('pre')).toHaveCount(0);check('artifact tables, settings, weight download, explicit raw export and advanced view');
  await page.goto(base+'/#models?tab=curves&experiment='+'1'.repeat(32));await page.locator('.metric-chart').first().waitFor();await expect(page.locator('.metric-chart')).toHaveCount(3);await expect(page.locator('.metric-chart').filter({hasText:'val/box_loss'})).toContainText('缺值保留斷線');
  await page.getByLabel('顯示輔助平滑曲線（原始曲線保留）').check();await screenshot('curves');
  await page.getByLabel('選擇實驗').selectOption('2'.repeat(32));await expect(page.locator('.metric-chart')).toHaveCount(3);await expect(page.locator('.metric-chart h3')).toHaveText(['train_loss','val_accuracy','val_loss']);

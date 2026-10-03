@@ -12,10 +12,11 @@ def store(clock=None):
 
 def record_event(event_id,session,message,status,payload):
     with db() as con:
-        con.execute('INSERT OR REPLACE INTO events VALUES(?,?,?,?,?,?)',(event_id,session,message,status,json.dumps(payload,ensure_ascii=False),time.time()))
+        con.execute('INSERT OR REPLACE INTO events(id,session,message,status,payload,updated) VALUES(?,?,?,?,?,?)',(event_id,session,message,status,json.dumps(payload,ensure_ascii=False),time.time()))
 
 def dispatch(payload):
-    with file_lock(HOME/'simulation-dispatch.lock'):
+    from src.workbench.resources import resource_lock
+    with resource_lock(),file_lock(HOME/'simulation-dispatch.lock'):
         return _dispatch(payload)
 
 def _dispatch(payload):
@@ -45,7 +46,8 @@ def _dispatch(payload):
                 data=json.loads(row['payload'])
                 if data.get('job'):
                     from src.workbench.jobs import cancel
-                    cancel(data['job'])
+                    from src.workbench.resources import record
+                    if record('job',data['job'])['state']=='active':cancel(data['job'])
                 if data.get('trace_id'):
                     from src.workbench.jobs import folder
                     (folder(data['trace_id'])/'result.jpg').unlink(missing_ok=True)

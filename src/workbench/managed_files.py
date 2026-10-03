@@ -86,6 +86,14 @@ def inspect(path, root):
     with opened(path,root) as (stream,_): return identity(stream)
 
 
+def verify_stat(path, root, expected):
+    """Short handle-bound check after a hash scan; deletion rehashes the handle."""
+    with opened(path,root) as (stream,_):
+        s=os.fstat(stream.fileno())
+        actual={'device':s.st_dev,'inode':s.st_ino,'bytes':s.st_size,'modified_ns':s.st_mtime_ns}
+        if any(actual[k]!=expected[k] for k in actual):raise ValueError('預覽後檔案身分或內容已變更')
+
+
 def remove_verified(path, root, expected, before_remove):
     with opened(path,root,delete=True) as (stream,remove):
         if identity(stream) != expected: raise ValueError('檔案內容或身分已變更，停止此項清理')

@@ -15,7 +15,7 @@ def artifact_path(ident):
     return VERSIONS / ident
 
 @guarded
-def register(source: Path, model: str, config: dict, experiment: str, demo=True, extra=None):
+def register(source: Path, model: str, config: dict, experiment: str, demo=True, extra=None, *, expected_files=None):
     from src.workbench.resources import check_managed_path
     check_managed_path(source)
     ident = model + '_' + uuid.uuid4().hex[:16]
@@ -24,6 +24,8 @@ def register(source: Path, model: str, config: dict, experiment: str, demo=True,
     if source.is_dir(): shutil.copytree(source,stage,dirs_exist_ok=True,ignore=shutil.ignore_patterns('artifact.json'))
     else: shutil.copy2(source,stage/source.name)
     files = {p.relative_to(stage).as_posix():sha256(p) for p in stage.rglob('*') if p.is_file()}
+    if expected_files is not None and files!=expected_files:
+        raise ValueError('登錄複本與核准模型清單不符，未發布版本')
     metadata = {'schema_version':1,'id':ident,'model':model,'experiment':experiment,'created':stamp(),'files':files,'artifact_hash':digest(files),'config':config,'demo_only':demo,'extra':extra or {}}
     write_json(stage/'artifact.json',metadata)
     stage.rename(path)
@@ -31,6 +33,8 @@ def register(source: Path, model: str, config: dict, experiment: str, demo=True,
     return metadata
 
 def get(ident, verify=True):
+    from src.workbench.resources import record, ResourceUnavailable
+    if record('model',ident)['state']=='purged':raise ResourceUnavailable('model',ident,'purged')
     if verify: require_active('model',ident)
     path = artifact_path(ident)
     metadata = read_json(path/'artifact.json')
@@ -42,7 +46,8 @@ def get(ident, verify=True):
     return metadata
 
 def reports(ident):
-    return [read_json(p) for p in sorted((ROOT/'runs/workbench/evaluations').glob('*/report.json')) if read_json(p).get('artifact') == ident]
+    # Activation/evaluation authorization reads authoritative reports, not projections.
+    return [r for p in sorted((ROOT/'runs/workbench/evaluations').glob('*/report.json')) if (r:=read_json(p)).get('artifact')==ident]
 
 def listing(include_trashed=False):
     from src.workbench.storage import db
@@ -52,26 +57,40 @@ def listing(include_trashed=False):
     states_path=ROOT/'data/snapshot_states.json'
     states=read_json(states_path) if states_path.exists() else {}
     result=[]
-    lifecycle=resource_states('model')
-    for p in VERSIONS.glob('*/artifact.json'):
-        if p.parent.name.startswith('.'): continue
-        if not include_trashed and lifecycle.get(p.parent.name,'active')!='active':continue
-        meta=read_json(p); evaluations=reports(meta['id'])
+    by_artifact={}
+    from src.workbench.queries.reports import summaries
+    rows,_,_,_=summaries(ROOT,size=1000000)
+    for report in reversed(rows):by_artifact.setdefault(report.get('artifact'),[]).append(report)
+    latest_jobs={}
+    for j in evaluation_jobs:latest_jobs.setdefault(json.loads(j['config']).get('artifact'),j)
+    for meta in metadata_listing(include_trashed):
+        evaluations=by_artifact.get(meta['id'],[])
         meta['reports']=[{**r,'applicable':r.get('snapshot') not in states} for r in evaluations]
-        latest=next((j for j in evaluation_jobs if json.loads(j['config']).get('artifact')==meta['id']),None)
+        latest=latest_jobs.get(meta['id'])
         if evaluations and not meta['reports'][-1]['applicable']:state='not_applicable'
         elif latest and latest['state'] in ('queued','running'):state='pending' if latest['state']=='queued' else 'evaluating'
         elif latest and latest['state'] in ('failed','interrupted','cancelled'):state='failed'
         else:state='succeeded' if evaluations else 'pending'
         meta['evaluation_status']=state
+        meta['active_evaluation']=bool(latest and latest['state'] in ('queued','running'))
         result.append(meta)
     return sorted(result,key=lambda x:x['created'],reverse=True)
+
+def metadata_listing(include_trashed=False):
+    """Recipe cards and overview don't need evaluation history or weight contents."""
+    from src.workbench.queries.files import cached_many
+    lifecycle=resource_states('model')
+    paths=[p for p in VERSIONS.glob('*/artifact.json') if not p.parent.name.startswith('.') and (include_trashed or lifecycle.get(p.parent.name,'active')=='active')]
+    return sorted((m for m in cached_many(paths,ROOT) if m.get('extra',{}).get('purpose')!='checkpoint'),key=lambda x:x['created'],reverse=True)
+
+def count_active():return len(metadata_listing())
 
 @guarded
 def activate(ident, target='local', allow_unevaluated=False):
     if target not in ('local','line'): raise ValueError('Invalid reference')
     with file_lock(ROOT/'runtime/registry.lock'):
         metadata=get(ident)
+        if metadata.get('extra',{}).get('purpose')=='checkpoint':raise ValueError('Checkpoint 不可啟用為推論模型')
         state_path=ROOT/'data/snapshot_states.json'
         snapshot_states=read_json(state_path) if state_path.exists() else {}
         matched=[r for r in reports(ident) if r['artifact_hash']==metadata['artifact_hash'] and r['config']==metadata['config'] and r['metrics']['complete'] and r.get('snapshot') not in snapshot_states]
@@ -83,6 +102,7 @@ def activate(ident, target='local', allow_unevaluated=False):
         audit('activate_model',{'target':target,'artifact':ident,'previous':old})
         return new
 
+@guarded
 def rollback(target):
     path=REFS/(target+'.json')
     old=read_json(path)

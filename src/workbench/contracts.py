@@ -46,10 +46,21 @@ class Experiment(Strict):
     inference: InferenceConfig = InferenceConfig()
     resume_job: str | None = None
     initial_artifact: str | None = None
+    base_import: str | None = None
+    checkpoint_import: str | None = None
     allow_amp_check_download: bool = False
+
+    def model_dump(self,*args,**kwargs):
+        value=super().model_dump(*args,**kwargs)
+        # Keep old idempotency fingerprints stable when optional import features are unused.
+        for key in ('base_import','checkpoint_import'):
+            if value.get(key) is None:value.pop(key,None)
+        return value
 
     @model_validator(mode='after')
     def capabilities(self):
+        if self.checkpoint_import and not self.resume_job:raise ValueError('匯入 checkpoint 必須指定原工作')
+        if self.base_import and (self.initial_artifact or self.resume_job):raise ValueError('基礎權重、微調與續訓來源不可混用')
         yolo = {'optimizer','lr0','lrf','momentum','weight_decay','warmup_epochs','warmup_momentum','warmup_bias_lr','cos_lr','freeze','amp','workers','cache','deterministic','degrees','translate','scale','shear','perspective','hsv_h','hsv_s','hsv_v','mosaic','mixup','fliplr','flipud','box','cls','nbs'}
         if self.model != 'yolo26s': yolo.add('dfl')
         efficient = {'learning_rate','optimizer','weight_decay','scheduler','freeze','class_weight','flip','rotation'}

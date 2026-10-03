@@ -21,6 +21,7 @@ def resource_lock():
             try: yield
             finally: _local.depth -= 1
             return
+        started=time.perf_counter()
         deadline = time.monotonic() + 5
         while True:
             guard = file_lock(jobs.JOBS.parent / 'resource-lifecycle.lock')
@@ -31,6 +32,10 @@ def resource_lock():
                 if time.monotonic() >= deadline: raise
                 time.sleep(.02)
         _local.depth = 1
+        from src.telemetry import current
+        metrics=current.get()
+        if metrics is not None:
+            entry=metrics.setdefault('lifecycle_lock',{'ms':0,'calls':0});entry['ms']+=(time.perf_counter()-started)*1000;entry['calls']+=1
         try: yield
         finally:
             _local.depth = 0
@@ -81,3 +86,15 @@ def check_managed_path(path):
         if path.is_relative_to(root.resolve()):
             parts = path.relative_to(root.resolve()).parts
             if parts: require_active(kind, parts[0])
+
+
+def invalidate_capacity(path):
+    """Retention takes priority; cached bytes must not survive removed media."""
+    from src.workbench import jobs, registry
+    path=path.resolve()
+    for kind,root in [('job',jobs.JOBS),('model',registry.VERSIONS)]:
+        if path.is_relative_to(root.resolve()):
+            parts=path.relative_to(root.resolve()).parts
+            if parts:
+                with jobs.db() as con:
+                    con.execute('UPDATE resource_lifecycle SET capacity=NULL WHERE type=? AND id=?',(kind,parts[0]))

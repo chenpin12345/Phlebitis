@@ -5,6 +5,7 @@ from src.common import ROOT, inside, write_json,read_manifest,write_manifest,sta
 from src.workbench.storage import HOME, db, audit, flag
 from src.inference.engine import decode_image, encode_result
 from src.common import read_json
+from src.workbench.resources import resource_lock, guarded, invalidate_capacity
 
 def upload(raw,*,research=False,authorization='',purpose=''):
     image=decode_image(raw,read_json(ROOT/'configs/service.json'))
@@ -15,7 +16,7 @@ def upload(raw,*,research=False,authorization='',purpose=''):
     image.save(path,format='JPEG',quality=95)
     now=time.time(); expires=now+(30*86400 if research else 3600)
     metadata={'authorization':authorization,'purpose':purpose,'source':'local_upload','withdrawn':False}
-    with db() as con: con.execute('INSERT INTO assets VALUES(?,?,?,?,?,?)',(ident,category,str(path.relative_to(ROOT)),now,expires,json.dumps(metadata,ensure_ascii=False)))
+    with db() as con: con.execute('INSERT INTO assets(id,category,path,created,expires,metadata) VALUES(?,?,?,?,?,?)',(ident,category,str(path.relative_to(ROOT)),now,expires,json.dumps(metadata,ensure_ascii=False)))
     audit('upload',{'asset':ident,'category':category,'expires':expires})
     return {'id':ident,'category':category,'expires':expires,'width':image.width,'height':image.height}
 
@@ -66,7 +67,7 @@ def related(ident):
 def cleanup(ids):
     from src.lock import OperationLock
     from src.workbench.storage import file_lock
-    with OperationLock(),file_lock(ROOT/'runtime/data.lock'):
+    with OperationLock(),resource_lock(),file_lock(ROOT/'runtime/data.lock'):
         return _cleanup(ids)
 
 def _cleanup(ids):
@@ -85,6 +86,7 @@ def _cleanup(ids):
             allowed=[ROOT/'data/approved',ROOT/'data/pending_review',ROOT/'data/excluded',ROOT/'data/yolo',ROOT/'data/independent_test',ROOT/'runs/workbench/evaluations',ROOT/'runs/workbench/jobs',HOME/'features']
             if not any(file.is_relative_to(base) for base in allowed):raise ValueError('Derived data cleanup outside allowed managed locations')
             file.unlink(missing_ok=True)
+            invalidate_capacity(file)
         if impact['image_ids']:
             write_manifest([r for r in read_manifest() if r['image_id'] not in impact['image_ids']])
             independent=ROOT/'data/independent_test/manifest.json'
@@ -99,6 +101,8 @@ def _cleanup(ids):
                     data.update(state='withdrawn',reproducible=False)
                     con.execute('UPDATE cases SET data=? WHERE id=?',(json.dumps(data,ensure_ascii=False),row['id']))
         audit('delete_expired',{'asset':ident,'scope':'managed_copy_only','reproducibility':'referencing cases and affected snapshots unavailable','impact':impact})
+    from src.workbench.queries import data_index,images
+    data_index.invalidate(ROOT);images.clear(ROOT);data_index.request_rebuild(ROOT)
     return {'deleted':ids}
 
 def withdraw(ident):
@@ -106,7 +110,7 @@ def withdraw(ident):
     from src.workbench.storage import file_lock
     # Acquire both leases before changing validity. A busy response must not leave
     # an expired-but-still-confirmed case that background regression can select.
-    with OperationLock(),file_lock(ROOT/'runtime/data.lock'):
+    with OperationLock(),resource_lock(),file_lock(ROOT/'runtime/data.lock'):
         with db() as con:
             row=con.execute('SELECT metadata FROM assets WHERE id=?',(ident,)).fetchone()
             if not row: raise ValueError('Unknown asset')
@@ -115,6 +119,7 @@ def withdraw(ident):
         audit('withdraw',{'asset':ident})
         return _cleanup([ident])
 
+@guarded
 def expire_temporary():
     """Automatic expiry is limited to newly created ephemeral simulation media."""
     from src.workbench.jobs import listing,folder
@@ -130,3 +135,4 @@ def expire_temporary():
     for j in jobs:
         if j['kind']=='predict' and j.get('result') and j['result'].get('expires',0)<time.time():
             (folder(j['id'])/'result.jpg').unlink(missing_ok=True)
+            invalidate_capacity(folder(j['id'])/'result.jpg')

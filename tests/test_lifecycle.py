@@ -38,7 +38,7 @@ def test_research_promote_review_snapshot_and_withdraw(isolated):
     root,home,life,research=isolated
     asset=life.upload(raw(),research=True,authorization='synthetic test',purpose='fixture')
     case={'id':'a'*32,'asset':asset['id'],'state':'confirmed','label':'negative','reviewer':'tester','notes':'synthetic','boxes':[]}
-    with db(home) as con:con.execute('INSERT INTO cases VALUES(?,?,?)',(case['id'],1,json.dumps(case)))
+    with db(home) as con:con.execute('INSERT INTO cases(id,revision,data) VALUES(?,?,?)',(case['id'],1,json.dumps(case)))
     row=research.promote(case['id'],subject_id='new-subject')
     review(row['image_id'],status='approved',label='negative',reviewer='tester',reason='synthetic',subject_id='new-subject',root=root)
     info=build(root=root)
@@ -56,7 +56,7 @@ def test_import_failure_rolls_back_and_independent_duplicate_rejected(isolated,m
     root,home,life,research=isolated
     asset=life.upload(raw(),research=True,authorization='test consent',purpose='test')
     case={'id':'b'*32,'asset':asset['id'],'state':'confirmed','label':'negative','reviewer':'tester','boxes':[]}
-    with db(home) as con:con.execute('INSERT INTO cases VALUES(?,?,?)',(case['id'],1,json.dumps(case)))
+    with db(home) as con:con.execute('INSERT INTO cases(id,revision,data) VALUES(?,?,?)',(case['id'],1,json.dumps(case)))
     original=research.write_manifest
     def fail(rows):raise OSError('disk failure')
     monkeypatch.setattr(research,'write_manifest',fail)

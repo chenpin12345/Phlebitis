@@ -29,3 +29,5 @@ button:focus-visible,a:focus-visible,summary:focus-visible,rect:focus-visible{ou
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #087e84;outline-offset:3px}
 .capacity-detail dl{display:grid;grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);gap:8px}.capacity-detail dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:600px){.managed-dialog{padding:16px}.managed-dialog>header{flex-wrap:wrap}.managed-dialog button{min-height:44px}.capacity-detail dl{grid-template-columns:1fr}.capacity-detail dd{margin-bottom:10px}.topbar{justify-content:flex-start}.event-timeline{padding-left:14px}}
+.managed-dialog button.danger { background:#a52b2b; border-color:#a52b2b; color:#fff; }
+.managed-dialog button.danger:disabled { background:#ead9d9; border-color:#d5bcbc; color:#665454; }

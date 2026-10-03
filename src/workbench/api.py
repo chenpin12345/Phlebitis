@@ -23,23 +23,36 @@ from src.workbench import jobs, registry, lifecycle, simulation
 from src.workbench import trash, resources, report_views
 
 def create_app(*,testing=False):
+    from src.workbench.queries import data_index
+    index_monitor=data_index.Monitor(ROOT)
+    if testing:
+        data_index.rebuild(ROOT)
+        from src.workbench.queries.legacy import rebuild as legacy_rebuild
+        legacy_rebuild(ROOT)
     manager=jobs.Manager()
     maintenance=trash.Maintenance(secrets.token_urlsafe(32))
     @asynccontextmanager
     async def lifespan(app):
         if not testing:
             maintenance.recover()
+            from src.imports.service import recover as recover_imports
+            recover_imports(ROOT)
             from src.data.dataset import recover_reviews
             from src.workbench.storage import file_lock
             with file_lock(ROOT/'runtime/data.lock'): recover_reviews(ROOT)
             registry.import_legacy()
+            index_monitor.start()
             manager.start()
         yield
         manager.close()
         maintenance.close()
+        import_pool.shutdown(wait=True,cancel_futures=True)
+        index_monitor.close()
     app=FastAPI(title='Phlebitis local workbench',lifespan=lifespan,docs_url=None,redoc_url=None)
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost']+(['testserver'] if testing else []))
     csrf=secrets.token_urlsafe(32)
+    from src.workbench.routes.imports import mount
+    import_pool=mount(app,ROOT,csrf)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request,exc):
@@ -51,6 +64,9 @@ def create_app(*,testing=False):
 
     @app.middleware('http')
     async def browser_boundary(request,call_next):
+        request.state.started=time.perf_counter()
+        from src.telemetry import current
+        measurements={};metric_token=current.set(measurements)
         if request.headers.get('sec-fetch-site')=='cross-site':return JSONResponse({'detail':'Cross-site request denied'},status_code=403)
         origin=request.headers.get('origin')
         if origin and origin != str(request.base_url).rstrip('/'):
@@ -73,7 +89,10 @@ def create_app(*,testing=False):
             response=await call_next(request)
             if request.method not in ('GET','HEAD','OPTIONS') and response.status_code>=400:
                 audit('request_failed',{'path':request.url.path,'method':request.method,'status':response.status_code},outcome='failed')
-        finally: operator.reset(actor_token)
+        finally:
+            operator.reset(actor_token)
+            current.reset(metric_token)
+        response.headers['Server-Timing']='total;dur='+str(round((time.perf_counter()-request.state.started)*1000,2))+''.join(','+key+';dur='+str(round(value['ms'],2)) for key,value in measurements.items())
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Cache-Control']='no-store'
         response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"
@@ -90,21 +109,24 @@ def create_app(*,testing=False):
     @app.get('/api/v1/session')
     def session():return {'csrf':csrf,'actor':'local_operator','research_only':True}
 
-    @app.get('/api/v1/trash')
+    @app.get('/api/v1/trash',response_model=trash.TrashListResponse)
     def trash_list(type:str='',search:str='',start:str='',end:str='',actor:str='',sort:str='moved',direction:str='desc',page:int=1,size:int=30):
         return trash.list_trash(type,search,start,end,actor,sort,direction,page,size)
 
-    @app.post('/api/v1/trash/previews')
+    @app.get('/api/v1/trash/operation-history')
+    def trash_history(page:int=1,size:int=30):return trash.operation_history(page,size)
+
+    @app.post('/api/v1/trash/previews',response_model=trash.PreviewResponse)
     def trash_preview(body:trash.PreviewRequest):return maintenance.preview(body)
 
-    @app.get('/api/v1/trash/previews/{ident}')
+    @app.get('/api/v1/trash/previews/{ident}',response_model=trash.PreviewResponse)
     def trash_preview_status(ident,page:int=1,size:int=100):return maintenance.get_preview(ident,page,size)
 
-    @app.post('/api/v1/trash/operations')
+    @app.post('/api/v1/trash/operations',response_model=trash.OperationResponse)
     def trash_commit(body:trash.CommitRequest,request:Request):return maintenance.commit(body,request.headers.get('idempotency-key'))
 
-    @app.get('/api/v1/trash/operations/{ident}')
-    def trash_operation(ident):return trash.operation(ident)
+    @app.get('/api/v1/trash/operations/{ident}',response_model=trash.OperationResponse)
+    def trash_operation(ident,page:int=1,size:int=100):return trash.operation(ident,page,size)
 
     @app.post('/api/v1/trash/operations/{ident}/retry')
     def trash_retry(ident):return maintenance.retry(ident)
@@ -118,7 +140,8 @@ def create_app(*,testing=False):
     def trash_detail(kind,ident):
         item=resources.record(kind,ident)
         if item['state']=='active':raise ValueError('此資源不在垃圾桶')
-        return item
+        from src.workbench.views import redact
+        return redact(item)
 
     @app.get('/api/v1/references')
     def references():return trash.reference_chains()
@@ -133,7 +156,7 @@ def create_app(*,testing=False):
     def reports_query(model:str='',page:int=1,size:int=30):return report_views.query(model,page,size)
 
     @app.get('/api/v1/reports/{ident}/samples')
-    def report_samples(ident,page:int=1,size:int=30):return report_views.samples(ident,page,size)
+    def report_samples(ident,page:int=1,size:int=30,image:str=''):return report_views.samples(ident,page,size,image)
 
     @app.get('/api/v1/reports/{ident}/detail')
     def report_detail(ident):
@@ -155,16 +178,24 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/overview')
     def overview():
-        from collections import Counter
-        from src.workbench.views import data_rows, in_view, VIEWS
-        from src.workbench.storage import dataset_lock
-        with dataset_lock(ROOT): rows=data_rows(ROOT)
-        states=jobs.listing()
-        return {'data':{v:sum(in_view(r,v) for r in rows) for v in VIEWS},'approved_labels':dict(Counter(r['label_state'] for r in rows if r['training_eligible'])),'verified_subjects':len({r['subject_id'] for r in rows if r['group_verified']=='true' and r['subject_id']}),'jobs':states,'references':{t:read_json(registry.REFS/(t+'.json')) if (registry.REFS/(t+'.json')).exists() else None for t in ('local','line')},'artifacts':len(registry.listing())}
+        return {**data_index.overview(ROOT),'jobs':jobs.summaries()['items'],'references':{t:read_json(registry.REFS/(t+'.json')) if (registry.REFS/(t+'.json')).exists() else None for t in ('local','line')},'artifacts':registry.count_active()}
+
+    @app.post('/api/v1/data-index/rebuild')
+    def rebuild_index():
+        data_index.invalidate(ROOT);data_index.request_rebuild(ROOT)
+        return data_index.state(ROOT)
+
+    @app.get('/api/v1/data-index')
+    def index_status():return data_index.freshness(ROOT)
 
     @app.get('/api/v1/doctor')
     def doctor():
-        packages={}; errors=[]; cuda=gpu=vram=free=None
+        packages={}; errors=[]; cuda=gpu=vram=free=compute_available=None
+        from src.lock import OperationLock
+        try:
+            with OperationLock():compute_available=True
+        except RuntimeError:compute_available=False
+        except OSError:errors.append('無法檢查運算鎖狀態')
         for name in ['torch','torchvision','ultralytics','transformers','safetensors','scikit-learn','fastapi','psutil']:
             try:packages[name]=version(name)
             except PackageNotFoundError:packages[name]=None
@@ -175,7 +206,7 @@ def create_app(*,testing=False):
         except Exception as exc: errors.append('GPU 檢查失敗：'+str(exc))
         try: free=round(shutil.disk_usage(ROOT).free/1024**3,1)
         except OSError as exc: errors.append('磁碟檢查失敗：'+str(exc))
-        return {'packages':packages,'cuda':cuda,'gpu':gpu,'vram':vram,'free_disk_gb':free,'check_errors':errors,'frontend_ready':(ROOT/'web/dist/index.html').exists(),'ports':{'workbench':8765,'line':8000},'line_credentials_required':False,'repair':'執行 scripts/setup-workbench.ps1 安裝專案依賴；GPU 不可用時明確選擇 CPU。'}
+        return {'packages':packages,'cuda':cuda,'gpu':gpu,'vram':vram,'free_disk_gb':free,'compute_available':compute_available,'check_errors':errors,'frontend_ready':(ROOT/'web/dist/index.html').exists(),'ports':{'workbench':8765,'line':8000},'line_credentials_required':False,'repair':'執行 scripts/setup-workbench.ps1 安裝專案依賴；GPU 不可用時明確選擇 CPU。'}
 
     @app.get('/api/v1/line/state')
     def line_state():
@@ -202,9 +233,7 @@ def create_app(*,testing=False):
 
     @app.get('/api/v1/data-query')
     def data_query(view:str='pending_review',reviewer:str='',decision:str='',start:str='',end:str='',page:int=1,size:int=30):
-        from src.workbench.views import query_data
-        from src.workbench.storage import dataset_lock
-        with dataset_lock(ROOT): return query_data(ROOT,view,reviewer,decision,start,end,page,size)
+        return data_index.query(ROOT,view,reviewer,decision,start,end,page,size)
 
     @app.get('/api/v1/audit-query')
     def audit_query(actor:str='',action:str='',related:str='',outcome:str='',start:str='',end:str='',page:int=1,size:int=30,snapshot:str=''):
@@ -260,11 +289,9 @@ def create_app(*,testing=False):
         return row
 
     @app.get('/api/v1/data/{ident}/image')
-    def data_image(ident):
-        row=find_image(ident)
-        with Image.open(inside(row['image_path'])) as im:
-            image=ImageOps.exif_transpose(im).convert('RGB'); image.thumbnail((1800,1800)); buf=io.BytesIO();image.save(buf,'JPEG',quality=90)
-        return Response(buf.getvalue(),media_type='image/jpeg')
+    def data_image(ident,thumbnail:bool=False):
+        from src.workbench.queries.images import render
+        return Response(render(ROOT,find_image(ident),thumbnail),media_type='image/jpeg')
 
     @app.get('/api/v1/data/{ident}/annotation')
     def annotation(ident):
@@ -277,7 +304,8 @@ def create_app(*,testing=False):
             try: boxes=from_labelme(read_json(inside(row['annotation_path'])),size)
             except ValueError as exc: diagnostic=str(exc)
         history=[read_json(p) for p in sorted((ROOT/'data/reviews').glob('*_'+ident+'.json'))]
-        return {'row':row,'revision':digest(row),'boxes':orient_boxes(boxes,orientation),'orientation':orientation,'original_size':size,'coordinate_system':'EXIF-corrected normalized YOLO xywh','history':history,'coordinate_warning':diagnostic}
+        from src.imports.service import candidate_annotations
+        return {'import_candidates':candidate_annotations(ROOT,ident,size,orientation),'row':row,'revision':digest(row),'boxes':orient_boxes(boxes,orientation),'orientation':orientation,'original_size':size,'coordinate_system':'EXIF-corrected normalized YOLO xywh','history':history,'coordinate_warning':diagnostic}
 
     @app.put('/api/v1/data/{ident}')
     def save_review(ident,body:Review):
@@ -297,12 +325,21 @@ def create_app(*,testing=False):
         try:
             args=body.model_dump();args.pop('boxes')
             result=review(ident,annotation=str(staged),**args)
+            data_index.rebuild(ROOT)
+            from src.workbench.queries.images import clear
+            clear(ROOT)
             audit('review',{'image_id':ident,'reason':body.reason,'reviewer':body.reviewer,'revision_before':body.revision},actor=body.reviewer)
             return result
         finally:staged.unlink(missing_ok=True)
 
     @app.get('/api/v1/snapshots')
     def snapshots():return [read_json(p) for p in sorted((ROOT/'data/yolo').glob('*/dataset_version.json'),reverse=True)]
+
+    @app.get('/api/v1/snapshot-options')
+    def snapshot_options():
+        from src.workbench.queries.files import cached_many
+        rows=cached_many(sorted((ROOT/'data/yolo').glob('*/dataset_version.json'),reverse=True),ROOT)
+        return [{k:([{**{a:b for a,b in fold.items() if a!='members'},'counts':{name:len(members) for name,members in fold.get('members',{}).items()}} for fold in v] if k=='folds' else v) for k,v in row.items() if k in ('version','purpose','folds','demo_only','created_at')} for row in rows]
 
     @app.post('/api/v1/snapshots')
     def snapshot(body:SnapshotRequest):
@@ -312,7 +349,7 @@ def create_app(*,testing=False):
     @app.get('/api/v1/models')
     def models():
         cards=[]
-        artifacts=registry.listing()
+        artifacts=registry.metadata_listing()
         for key,value in MODELS.items():
             path=ROOT/'models/pretrained'/(key if key=='dinov2_small' else key+('.pt' if key.startswith('yolo') else '.pth'))
             ready=(path/'model.safetensors').exists() if key=='dinov2_small' else path.exists()
@@ -334,6 +371,9 @@ def create_app(*,testing=False):
     def prepare(model):
         if model not in MODELS:raise ValueError('Unknown model')
         return jobs.enqueue('prepare',{'model':model})
+
+    @app.get('/api/v1/jobs-query')
+    def jobs_query(page:int=1,size:int=30,kind:str=''):return jobs.summaries(page,size,kind)
 
     @app.get('/api/v1/jobs')
     def job_list():return jobs.listing()
@@ -363,17 +403,30 @@ def create_app(*,testing=False):
         return [jobs.enqueue('train',cfg.model_dump(),key+':'+str(i)) for i,cfg in enumerate(body)]
 
     @app.get('/api/v1/jobs/{ident}')
-    def job(ident):
+    def job(ident,details:bool=True):
         state=resources.record('job',ident)['state']
         if state=='purged':raise resources.ResourceUnavailable('job',ident,state)
         item=jobs.get(ident); log=jobs.folder(ident)/'worker.log'
         item['resource_state']=state
-        item['log']=log.read_text(encoding='utf-8',errors='replace')[-18000:] if log.exists() else ''
+        item['log']=''
+        if details and log.exists():
+            with log.open('rb') as stream:
+                stream.seek(max(0,log.stat().st_size-72000));item['log']=stream.read(72000).decode('utf-8',errors='replace')[-18000:]
         curve=jobs.folder(ident)/'progress.jsonl'
         from src.workbench.presentation import history
-        item['history']=history(curve)[-1000:]
+        item['history']=history(curve)[-1000:] if details else []
         from src.workbench.views import redact
         return redact(item)
+
+    @app.get('/api/v1/jobs/{ident}/log')
+    def job_log(ident,offset:int=0,limit:int=65536):
+        if offset<0 or not 1<=limit<=262144:raise ValueError('無效的日誌範圍')
+        if resources.record('job',ident)['state']=='purged':raise resources.ResourceUnavailable('job',ident,'purged')
+        path=jobs.folder(ident)/'worker.log'
+        if not path.exists():return {'text':'','next_offset':0,'reset':False,'eof':True}
+        size=path.stat().st_size;reset=offset>size;offset=0 if reset else offset
+        with path.open('rb') as stream:stream.seek(offset);content=stream.read(limit);end=stream.tell()
+        return {'text':content.decode('utf8',errors='replace'),'next_offset':end,'reset':reset,'eof':end>=size}
 
     @app.get('/api/v1/jobs/{ident}/events')
     async def job_events(ident,request:Request):
@@ -424,6 +477,7 @@ def create_app(*,testing=False):
         return jobs.enqueue('evaluate',{'artifact':ident,'dataset':body['dataset'],'device':body.get('device','0')})
 
     @app.post('/api/v1/artifacts/{ident}/configuration')
+    @resources.guarded
     def configure_artifact(ident,body:InferenceConfig,device:str='0'):
         if device not in ('cpu','0'):raise ValueError('Invalid device')
         original=registry.get(ident)
@@ -442,7 +496,8 @@ def create_app(*,testing=False):
     def report_export(ident):
         jobs.folder(ident)
         audit('export_report',{'report':ident})
-        return FileResponse(ROOT/'runs/workbench/evaluations'/ident/'report.json',filename='evaluation-'+ident+'.json')
+        from src.workbench.views import redact
+        return JSONResponse(redact(report_views.get(ident)),headers={'Content-Disposition':'attachment; filename="evaluation-'+ident+'.json"'})
 
     @app.get('/api/v1/reports/{ident}/images/{image}')
     def report_image(ident,image):
@@ -479,6 +534,16 @@ def create_app(*,testing=False):
     def cases():
         with db() as con: return [json.loads(r[0]) for r in con.execute('SELECT data FROM cases')]
 
+    @app.get('/api/v1/cases-query')
+    def cases_query(page:int=1,size:int=30):
+        from src.workbench.queries.records import page_records
+        return page_records('cases',page,size)
+
+    @app.get('/api/v1/simulation-query')
+    def simulation_query(session:str='demo-1',page:int=1,size:int=30):
+        from src.workbench.queries.records import page_records
+        return page_records('events',page,size,session)
+
     @app.post('/api/v1/cases')
     def save_case(body:dict):
         from src.data.labels import validate
@@ -499,7 +564,7 @@ def create_app(*,testing=False):
             rev=(old[0] if old else 0)+1
             body.update(id=ident,revision=rev)
             if old:write_json(HOME/'case_history'/ident/(str(old[0])+'.json'),json.loads(old[1]))
-            con.execute('INSERT OR REPLACE INTO cases VALUES(?,?,?)',(ident,rev,json.dumps(body,ensure_ascii=False)))
+            con.execute('INSERT OR REPLACE INTO cases(id,revision,data) VALUES(?,?,?)',(ident,rev,json.dumps(body,ensure_ascii=False)))
         audit('case_review',{'id':ident,'revision':rev});return body
 
     @app.post('/api/v1/regression')
