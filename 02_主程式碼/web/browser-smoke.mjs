@@ -1,0 +1,68 @@
+import {chromium,expect} from '@playwright/test';
+import fs from 'node:fs';
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:1050}});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+const evidence=[];const fixtureNote='Synthetic fixture; tests lifecycle only '+Date.now();
+try {
+ await page.goto('http://127.0.0.1:8765');
+ await page.getByRole('heading',{name:'總覽',exact:true}).waitFor();
+ await page.locator('.area-overview .area-card').first().waitFor();
+ evidence.push({overview_loaded:true});
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-overview.png',fullPage:true});
+ for(const [hash,title] of [['data','資料審查'],['models','模型與實驗'],['simulator','LINE 模擬'],['intake','LINE 研究收件'],['settings','設定與維護']]) {
+  await page.goto('http://127.0.0.1:8765/#'+hash);
+  await page.getByRole('heading',{name:title}).waitFor();
+  evidence.push({page:hash,heading:true});
+ }
+ await page.goto('http://127.0.0.1:8765/#data');
+ await page.locator('.thumb').first().click();
+ await page.locator('svg.annotation').waitFor();
+ await page.getByRole('button',{name:'新增矩形',exact:true}).click();
+ const box=await page.locator('svg.annotation').boundingBox();
+ await page.mouse.move(box.x+box.width*.2,box.y+box.height*.2);await page.mouse.down();await page.mouse.move(box.x+box.width*.6,box.y+box.height*.6);await page.mouse.up();
+ evidence.push({annotation_draft:await page.locator('.box-fields').count(),saved:false});
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-annotation.png',fullPage:true});
+ await page.goto('http://127.0.0.1:8765/#models');
+ await page.getByRole('button',{name:'建立實驗',exact:true}).click();
+ await page.getByLabel('模型方案',{exact:true}).selectOption('dinov2_small');
+ evidence.push({dino_hides_epochs:await page.getByLabel('最多 epochs').count()===0});
+ await page.getByRole('button',{name:'開始本地訓練',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'請選擇資料快照'}).waitFor();
+ evidence.push({invalid_experiment_shows_error:true});
+ await page.getByRole('button',{name:'評估比較',exact:true}).click();
+ await page.getByRole('heading',{name:/評估詳情/}).waitFor();
+ await page.getByText('同一張照片的標註與模型結果',{exact:true}).click();
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-comparison.png',fullPage:true});
+ await page.goto('http://127.0.0.1:8765/#simulator');
+ await page.getByRole('button',{name:'拍照說明',exact:true}).click();
+ await page.locator('.chat .bubble').filter({hasText:'請傳送一張對焦清楚'}).first().waitFor();
+ evidence.push({simulated_text_reply:true});
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-simulator.png',fullPage:true});
+ // Local synthetic fixture only. No patient annotation or active model change.
+ const bytes=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=320;c.height=240;const x=c.getContext('2d');x.fillStyle='#bbb';x.fillRect(0,0,320,240);x.fillStyle='#444';x.fillRect(80,60,100,100);return Array.from(Uint8Array.from(atob(c.toDataURL('image/png').split(',')[1]),s=>s.charCodeAt(0)))});
+ const upload={name:'synthetic-browser-fixture.png',mimeType:'image/png',buffer:Buffer.from(bytes)};
+ const response=await page.request.get('http://127.0.0.1:8765/api/v1/artifacts');const artifacts=await response.json();
+ const candidate=artifacts.find(a=>a.model==='efficientnet_b0'&&a.reports.some(r=>r.applicable));
+ await page.getByLabel('模型產物',{exact:true}).selectOption(candidate.id);
+ const dispatched=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/v1/simulation/events'));
+ await page.locator('.composer input[type=file]').setInputFiles(upload);
+ const eventResult=await (await dispatched).json();
+ if(!eventResult.job)throw Error('Synthetic photo was not queued: '+JSON.stringify(eventResult));
+ await expect.poll(async()=>{const r=await page.request.get('http://127.0.0.1:8765/api/v1/jobs/'+eventResult.job);return (await r.json()).state},{timeout:60000}).toBe('succeeded');
+ await page.locator('.chat img').last().waitFor({timeout:60000});
+ evidence.push({synthetic_photo_reply:true});
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-simulator-image.png',fullPage:true});
+ await page.route('**/api/v1/models',r=>r.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Injected acceptance outage'})}));
+ await page.goto('http://127.0.0.1:8765/#models');
+ await page.getByRole('alert').filter({hasText:'Injected acceptance outage'}).waitFor();
+ evidence.push({read_failure_visible:true});
+ await page.unroute('**/api/v1/models');
+ await page.setViewportSize({width:390,height:844});await page.goto('http://127.0.0.1:8765/#overview');
+ await page.locator('.area-overview .area-card').first().waitFor();
+ evidence.push({mobile_no_overflow:await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)});
+ await page.screenshot({path:'../../01_文件與紀錄/驗證報告/workbench-mobile.png',fullPage:true});
+ fs.writeFileSync('../../01_文件與紀錄/驗證報告/workbench-browser-evidence.json',JSON.stringify({evidence,errors},null,2));
+ if(errors.length)throw Error(errors.join('\n'));
+ console.log(JSON.stringify(evidence));
+} finally {await browser.close();}

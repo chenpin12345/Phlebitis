@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "note": "Only these explicitly listed external folders may be read. They are scanned read-only; files are copied into inbox/photos and then managed by the normal import service. Source files are never moved, renamed, overwritten or deleted.",
+  "sources": {
+    "yida": {
+      "name": "合作醫院照片資料夾",
+      "path": "C:\\path\\to\\external_source",
+      "label_rule": "yida_filename_v2",
+      "alias_source": "yida",
+      "auto_apply": true,
+      "authorization": {
+        "by": "專案負責人",
+        "date": "2026-10-14",
+        "scope": "合作醫院資料夾照片依檔名分類，免逐張人工審核：其他模型分類區直接採用檔名分期；YOLO 框選區中檔名為正常（_0）者設為確認無病灶，第一、二期仍需框選。既有人工結果與已排除照片不被覆蓋。"
+      }
+    }
+  }
+}

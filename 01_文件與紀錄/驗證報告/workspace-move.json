@@ -1,0 +1,290 @@
+{
+  "version": 1,
+  "moves": [
+    {
+      "from": "data",
+      "to": "03_模型與影像資料/data",
+      "at": 1791958317.054025
+    },
+    {
+      "from": "models",
+      "to": "03_模型與影像資料/models",
+      "at": 1791958317.054025
+    },
+    {
+      "from": "runs",
+      "to": "03_模型與影像資料/runs",
+      "at": 1791958317.054025
+    },
+    {
+      "from": "runtime",
+      "to": "03_模型與影像資料/runtime",
+      "at": 1791958317.054025
+    },
+    {
+      "from": "inbox",
+      "to": "03_模型與影像資料/inbox",
+      "at": 1791958317.0609894
+    },
+    {
+      "from": "archive",
+      "to": "03_模型與影像資料/archive",
+      "at": 1791958317.0609894
+    },
+    {
+      "from": "src",
+      "to": "02_主程式碼/src",
+      "at": 1791958317.0640285
+    },
+    {
+      "from": "web",
+      "to": "02_主程式碼/web",
+      "at": 1791958317.0775542
+    },
+    {
+      "from": "tests",
+      "to": "02_主程式碼/tests",
+      "at": 1791958317.0775542
+    },
+    {
+      "from": "scripts",
+      "to": "02_主程式碼/scripts",
+      "at": 1791958317.0802615
+    },
+    {
+      "from": "configs",
+      "to": "02_主程式碼/configs",
+      "at": 1791958317.0824285
+    },
+    {
+      "from": "requirements.txt",
+      "to": "02_主程式碼/requirements.txt",
+      "at": 1791958317.0824285
+    },
+    {
+      "from": "requirements-dev.txt",
+      "to": "02_主程式碼/requirements-dev.txt",
+      "at": 1791958317.08554
+    },
+    {
+      "from": "requirements.lock.txt",
+      "to": "02_主程式碼/requirements.lock.txt",
+      "at": 1791958317.08554
+    },
+    {
+      "from": "pytest.ini",
+      "to": "02_主程式碼/pytest.ini",
+      "at": 1791958317.08554
+    },
+    {
+      "from": ".gitignore",
+      "to": "02_主程式碼/.gitignore",
+      "at": 1791958317.08554
+    },
+    {
+      "from": ".venv",
+      "to": "02_主程式碼/.venv",
+      "at": 1791958317.1013877
+    },
+    {
+      "from": ".pytest_cache",
+      "to": "02_主程式碼/.pytest_cache",
+      "at": 1791958317.1013877
+    },
+    {
+      "from": "import-regression.mjs",
+      "to": "02_主程式碼/import-regression.mjs",
+      "at": 1791958317.1108382
+    },
+    {
+      "from": "啟動本地預測.cmd",
+      "to": "02_主程式碼/啟動本地預測.cmd",
+      "at": 1791958317.1108382
+    },
+    {
+      "from": "啟動研究工作台.cmd",
+      "to": "02_主程式碼/啟動研究工作台.cmd",
+      "at": 1791958317.1108382
+    },
+    {
+      "from": "README.md",
+      "to": "02_主程式碼/README.md",
+      "at": 1791958317.1108382
+    },
+    {
+      "from": "docs/DATA.md",
+      "to": "01_文件與紀錄/操作與交付說明/DATA.md",
+      "at": 1791958317.1108382
+    },
+    {
+      "from": "docs/DATA_REVIEW.md",
+      "to": "01_文件與紀錄/操作與交付說明/DATA_REVIEW.md",
+      "at": 1791958317.1171403
+    },
+    {
+      "from": "docs/TRAINING.md",
+      "to": "01_文件與紀錄/操作與交付說明/TRAINING.md",
+      "at": 1791958317.1171403
+    },
+    {
+      "from": "docs/LINE.md",
+      "to": "01_文件與紀錄/操作與交付說明/LINE.md",
+      "at": 1791958317.1171403
+    },
+    {
+      "from": "docs/RESEARCH_INTAKE.md",
+      "to": "01_文件與紀錄/操作與交付說明/RESEARCH_INTAKE.md",
+      "at": 1791958317.1191711
+    },
+    {
+      "from": "docs/WORKBENCH.md",
+      "to": "01_文件與紀錄/操作與交付說明/WORKBENCH.md",
+      "at": 1791958317.1191711
+    },
+    {
+      "from": "docs/HANDOVER.md",
+      "to": "01_文件與紀錄/操作與交付說明/HANDOVER.md",
+      "at": 1791958317.1191711
+    },
+    {
+      "from": "docs/verification",
+      "to": "01_文件與紀錄/驗證報告/verification",
+      "at": 1791958317.1191711
+    },
+    {
+      "from": "docs/environment.json",
+      "to": "01_文件與紀錄/驗證報告/environment.json",
+      "at": 1791958317.1191711
+    },
+    {
+      "from": "docs/resume-check.json",
+      "to": "01_文件與紀錄/驗證報告/resume-check.json",
+      "at": 1791958317.1277533
+    },
+    {
+      "from": "docs/test-results.xml",
+      "to": "01_文件與紀錄/驗證報告/test-results.xml",
+      "at": 1791958317.1277533
+    },
+    {
+      "from": "docs/archive-integrity.json",
+      "to": "01_文件與紀錄/驗證報告/archive-integrity.json",
+      "at": 1791958317.1277533
+    },
+    {
+      "from": "docs/workbench-annotation.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-annotation.png",
+      "at": 1791958317.1277533
+    },
+    {
+      "from": "docs/workbench-archive-check.json",
+      "to": "01_文件與紀錄/驗證報告/workbench-archive-check.json",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-browser-evidence.json",
+      "to": "01_文件與紀錄/驗證報告/workbench-browser-evidence.json",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-comparison.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-comparison.png",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-mobile.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-mobile.png",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-overview.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-overview.png",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-regression-evidence.json",
+      "to": "01_文件與紀錄/驗證報告/workbench-regression-evidence.json",
+      "at": 1791958317.1329582
+    },
+    {
+      "from": "docs/workbench-simulator-image.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-simulator-image.png",
+      "at": 1791958317.1404843
+    },
+    {
+      "from": "docs/workbench-simulator.png",
+      "to": "01_文件與紀錄/驗證報告/workbench-simulator.png",
+      "at": 1791958317.1404843
+    },
+    {
+      "from": "docs/workbench-smoke.json",
+      "to": "01_文件與紀錄/驗證報告/workbench-smoke.json",
+      "at": 1791958317.1404843
+    },
+    {
+      "from": "docs/PERFORMANCE_RESULTS.md",
+      "to": "01_文件與紀錄/驗證報告/PERFORMANCE_RESULTS.md",
+      "at": 1791958317.1444147
+    },
+    {
+      "from": "docs/WORKBENCH_ACCEPTANCE.md",
+      "to": "01_文件與紀錄/驗證報告/WORKBENCH_ACCEPTANCE.md",
+      "at": 1791958317.1444147
+    },
+    {
+      "from": "docs/ASTRA_WORKBENCH_PROMPT.md",
+      "to": "01_文件與紀錄/歷史紀錄/ASTRA_WORKBENCH_PROMPT.md",
+      "at": 1791958317.1444147
+    },
+    {
+      "from": "docs/IMPLEMENTATION.md",
+      "to": "01_文件與紀錄/歷史紀錄/IMPLEMENTATION.md",
+      "at": 1791958317.1490374
+    },
+    {
+      "from": "docs/TRASH_IMPLEMENTATION.md",
+      "to": "01_文件與紀錄/歷史紀錄/TRASH_IMPLEMENTATION.md",
+      "at": 1791958317.1490374
+    },
+    {
+      "from": "docs/TRASH_IMPLEMENTATION_STATUS.md",
+      "to": "01_文件與紀錄/歷史紀錄/TRASH_IMPLEMENTATION_STATUS.md",
+      "at": 1791958317.1490374
+    },
+    {
+      "from": "docs/TRASH_REQUIREMENTS.md",
+      "to": "01_文件與紀錄/歷史紀錄/TRASH_REQUIREMENTS.md",
+      "at": 1791958317.1549187
+    },
+    {
+      "from": "docs/WORKBENCH_SEVEN_ITEMS.md",
+      "to": "01_文件與紀錄/歷史紀錄/WORKBENCH_SEVEN_ITEMS.md",
+      "at": 1791958317.1567366
+    },
+    {
+      "from": "docs/PERFORMANCE_IMPORTS.md",
+      "to": "01_文件與紀錄/歷史紀錄/PERFORMANCE_IMPORTS.md",
+      "at": 1791958317.1567366
+    },
+    {
+      "from": "docs/line_menu",
+      "to": "01_文件與紀錄/LINE選單",
+      "at": 1791958317.1567366
+    },
+    {
+      "from": "docs/成果報告NEW.docx",
+      "to": "01_文件與紀錄/研究報告/成果報告NEW.docx",
+      "at": 1791958317.1610765
+    },
+    {
+      "from": "reports",
+      "to": "01_文件與紀錄/研究報告/reports",
+      "at": 1791958317.1610765
+    },
+    {
+      "from": "research_notes",
+      "to": "01_文件與紀錄/研究報告/research_notes",
+      "at": 1791958317.1610765
+    }
+  ]
+}

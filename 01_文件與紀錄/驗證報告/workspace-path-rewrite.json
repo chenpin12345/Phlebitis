@@ -1,0 +1,89 @@
+{
+  "old_prefix": "C:\\path\\to\\Phlebitis\\",
+  "new_prefix": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\",
+  "files": [
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold0\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T020739196159Z\\fold0",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold0"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold1\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T020739196159Z\\fold1",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold1"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold2\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T020739196159Z\\fold2",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T020739196159Z\\fold2"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold0\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T021346660375Z\\fold0",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold0"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold1\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T021346660375Z\\fold1",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold1"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold2\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260925T021346660375Z\\fold2",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260925T021346660375Z\\fold2"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold0\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260927T142542132755Z\\fold0",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold0"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold1\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260927T142542132755Z\\fold1",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold1"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold2\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_20260927T142542132755Z\\fold2",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_20260927T142542132755Z\\fold2"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold0\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold0",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold0"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold1\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold1",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold1"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold2\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold2",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_binary_20261014T020159408892Z\\fold2"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold0\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold0",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold0"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold1\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold1",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold1"
+    },
+    {
+      "file": "03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold2\\dataset.yaml",
+      "old": "C:\\path\\to\\Phlebitis\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold2",
+      "new": "C:\\path\\to\\Phlebitis\\03_模型與影像資料\\data\\yolo\\demo_stage_20261014T045453293075Z\\fold2"
+    },
+    {
+      "file": "03_模型與影像資料\\models\\selected\\evaluation.json",
+      "changed": true
+    },
+    {
+      "file": "03_模型與影像資料\\runtime\\ultralytics\\Ultralytics\\settings.json",
+      "changed": true
+    }
+  ]
+}

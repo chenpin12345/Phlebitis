@@ -1,0 +1,31 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+data/**
+!data/**/README.md
+models/**
+!models/**/README.md
+runs/**
+!runs/README.md
+runtime/**
+!runtime/README.md
+archive/**
+!archive/README.md
+*.cache
+*.log
+
+# Original project report may contain sensitive source images.
+docs/*.docx
+web/node_modules/
+web/dist/
+web/test-results/
+
+# Manual research imports and derived runtime state
+inbox/**
+!inbox/photos/
+!inbox/models/
+!inbox/**/README.md
+!runtime/cache/
+!runtime/imports/
+!runtime/**/README.md

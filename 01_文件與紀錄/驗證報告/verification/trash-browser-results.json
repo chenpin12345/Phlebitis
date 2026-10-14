@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "name": "operator relocated and trash last in navigation",
+      "passed": true
+    },
+    {
+      "name": "snapshot tab, explicit creation, link to experiment and manual fold selection",
+      "passed": true
+    },
+    {
+      "name": "repeated reports kept, historical thumbnails, modal keyboard and URL selection",
+      "passed": true
+    },
+    {
+      "name": "sample pagination and missing historical image with no manifest fallback",
+      "passed": true
+    },
+    {
+      "name": "empty exact filter, refresh and browser back",
+      "passed": true
+    },
+    {
+      "name": "model switch rejects stale report response",
+      "passed": true
+    },
+    {
+      "name": "safe initial focus and Enter cancels without deleting",
+      "passed": true
+    },
+    {
+      "name": "job list checkbox and cross-page select all",
+      "passed": true
+    },
+    {
+      "name": "job move/restore preserves ID, execution state, capacity and deep link",
+      "passed": true
+    },
+    {
+      "name": "audit explicit batch selection, typed purge and exact deletion",
+      "passed": true
+    },
+    {
+      "name": "reference blockers and explicit historical release preserve current model",
+      "passed": true
+    },
+    {
+      "name": "responsive no overflow trash",
+      "passed": true
+    },
+    {
+      "name": "responsive no overflow models?tab=compare&model=yolo11n",
+      "passed": true
+    },
+    {
+      "name": "responsive no overflow models?tab=snapshots",
+      "passed": true
+    },
+    {
+      "name": "trash permission error with no stale rows",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

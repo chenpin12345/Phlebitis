@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "note": "Research consent is separate from photo analysis. Real LINE users are only asked when line_enabled is true AND the current version is marked approved (for example after IRB approval). The simulator may use an unapproved draft; simulated consent is never a real research authorization.",
+  "line_enabled": false,
+  "simulator_enabled": true,
+  "current_version": "draft-2026-10",
+  "versions": {
+    "draft-2026-10": {
+      "approved": false,
+      "approved_by": null,
+      "title": "照片研究使用同意（草稿，尚未核定）",
+      "scope": "line_photo_research_v1",
+      "retention": "保存至您撤回同意為止；撤回後停止研究使用並刪除研究副本。已完成訓練的模型無法移除既有影響，將標記需重新評估。",
+      "text": "您可以選擇是否同意將這張照片提供給本研究使用（用於人工標註與改進研究模型）。不同意不影響照片分析。同意後您可隨時傳送「撤回研究同意」停止研究使用。此文字為草稿，正式使用前需經倫理審查核定。"
+    }
+  }
+}

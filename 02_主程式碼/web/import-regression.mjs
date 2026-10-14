@@ -1,0 +1,45 @@
+// Synthetic fixture on 8877 only; no model execution or real research files.
+import {chromium,expect} from '@playwright/test';
+import fs from 'node:fs';
+const base='http://127.0.0.1:8877',checks=[],errors=[];
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:1050}});
+page.on('pageerror',e=>errors.push(e.message));
+const check=name=>{checks.push({name,passed:true});console.log('PASS '+name)};
+try{
+ const requests=[];page.on('request',r=>requests.push(r.url()));
+ await page.goto(base+'/#models?tab=compare');await page.getByRole('heading',{name:'模型與實驗',exact:true}).waitFor();await page.waitForTimeout(500);
+ expect(requests.filter(u=>/api\/v1\/(overview|snapshots|jobs-query|artifacts)(\?|$)/.test(u))).toHaveLength(0);check('inactive model tabs and overview do not request heavy data');
+ await page.goto(base+'/#data?area=cls&view=confirmed');await page.locator('.thumb').first().waitFor();requests.length=0;
+ await page.locator('[data-image-id="a_landscape"]').click();await page.locator('.preview img').waitFor();await page.waitForTimeout(100);
+ expect(requests.filter(u=>u.includes('/data/a_landscape/image')&&!u.includes('thumbnail'))).toHaveLength(1);check('classification view downloads the main image once');
+ await page.locator('.area-tab',{hasText:'YOLO 病灶框選區'}).click();await page.goto(base+'/#data?area=det&view=all&image=a_landscape');await page.locator('svg.annotation image').waitFor();await page.waitForTimeout(100);
+ expect(requests.filter(u=>u.includes('/data/a_landscape/image')&&!u.includes('thumbnail'))).toHaveLength(2);check('detection editor loads the main image once');
+ await page.getByRole('button',{name:'匯入照片',exact:true}).click();const dialog=page.getByRole('dialog');
+ await expect(dialog.getByRole('button',{name:'關閉／取消'})).toBeFocused();
+ await dialog.locator('select').selectOption('browser-batch');await dialog.getByRole('button',{name:'掃描並預覽'}).click();
+ await expect(dialog.getByRole('heading',{name:'匯入狀態：預覽就緒'})).toBeVisible({timeout:15000});
+ await expect(dialog.getByText('broken.jpg',{exact:true})).toBeVisible();await expect(dialog.getByText('拒絕',{exact:true})).toBeVisible();
+ await dialog.getByLabel('輸入「確認匯入」').fill('確認匯入');await dialog.getByRole('button',{name:'確認新增',exact:true}).click();
+ await expect(dialog.getByRole('heading',{name:'匯入狀態：完成'})).toBeVisible({timeout:15000});
+ check('photo preview rejects corrupt file and commits valid file');
+ await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy();
+ fs.mkdirSync('../runtime/performance',{recursive:true});await page.screenshot({path:'../runtime/performance/import-narrow.png',fullPage:true});check('import dialog narrow viewport');
+ await page.keyboard.press('Escape');await expect(page.getByRole('button',{name:'匯入照片',exact:true})).toBeFocused();
+ await page.setViewportSize({width:1440,height:1050});await page.goto(base+'/#data?view=pending_review');
+ const response=await page.request.get(base+'/api/v1/data-query?view=pending_review&size=100');const data=await response.json();
+ expect(data.items.some(i=>i.image_id.startsWith('import_')&&i.label_state==='unknown'&&!i.training_eligible)).toBeTruthy();check('import stays pending and does not acquire training eligibility');
+ await page.goto(base+'/#models?tab=catalog');await page.getByRole('button',{name:'匯入模型',exact:true}).click();
+ await dialog.locator('select').selectOption('browser-model');await dialog.getByRole('button',{name:'掃描並預覽'}).click();await expect(dialog.getByRole('heading',{name:'匯入狀態：預覽就緒'})).toBeVisible({timeout:15000});
+ await dialog.getByLabel('輸入「確認匯入」').fill('確認匯入');await dialog.getByRole('button',{name:'確認新增',exact:true}).click();await expect(dialog.getByRole('heading',{name:'匯入狀態：完成'})).toBeVisible({timeout:15000});
+ expect(await dialog.locator('pre').count()).toBe(0);check('model import has structured preview and completes without raw JSON');
+ const overview=await (await page.request.get(base+'/api/v1/overview')).json();expect(overview.references).toEqual({local:null,line:null});check('model import does not switch references');
+ await page.keyboard.press('Escape');await page.goto(base+'/#data?area=det&view=all');
+ await page.route('**/api/v1/data-area?*',r=>r.fulfill({status:503,contentType:'application/json',body:'{"detail":"暫時無法查詢"}'}));requests.length=0;await page.reload();
+ await expect(page.getByText('暫時無法查詢',{exact:true})).toBeVisible({timeout:15000});await page.waitForTimeout(1800);
+ expect(requests.filter(u=>u.includes('/data-area?')&&u.includes('size=24')).length).toBe(3);check('transient read failures retry at most twice then stop');
+ await page.unroute('**/api/v1/data-area?*');await page.getByRole('button',{name:'重試',exact:true}).click();await page.locator('.thumb').first().waitFor();check('manual retry recovers list');
+ await page.route('**/api/v1/data-area?*',async r=>{await new Promise(resolve=>setTimeout(resolve,18000));await r.continue().catch(()=>{})});await page.reload();
+ await expect(page.getByText('讀取逾時，請重試。',{exact:true})).toBeVisible({timeout:20000});check('hung read times out with retry control');
+ expect(errors).toEqual([]);
+}finally{fs.mkdirSync('../runtime/performance',{recursive:true});fs.writeFileSync('../runtime/performance/import-browser-results.json',JSON.stringify({checks,errors},null,2));await browser.close()}

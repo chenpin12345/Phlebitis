@@ -1,0 +1,49 @@
+{
+  "checks": [
+    {
+      "name": "inactive model tabs and overview do not request heavy data",
+      "passed": true
+    },
+    {
+      "name": "classification view downloads the main image once",
+      "passed": true
+    },
+    {
+      "name": "detection editor loads the main image once",
+      "passed": true
+    },
+    {
+      "name": "photo preview rejects corrupt file and commits valid file",
+      "passed": true
+    },
+    {
+      "name": "import dialog narrow viewport",
+      "passed": true
+    },
+    {
+      "name": "import stays pending and does not acquire training eligibility",
+      "passed": true
+    },
+    {
+      "name": "model import has structured preview and completes without raw JSON",
+      "passed": true
+    },
+    {
+      "name": "model import does not switch references",
+      "passed": true
+    },
+    {
+      "name": "transient read failures retry at most twice then stop",
+      "passed": true
+    },
+    {
+      "name": "manual retry recovers list",
+      "passed": true
+    },
+    {
+      "name": "hung read times out with retry control",
+      "passed": true
+    }
+  ],
+  "errors": []
+}
