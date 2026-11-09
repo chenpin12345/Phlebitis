@@ -4,6 +4,7 @@ Kept outside the manifest so that a display-name correction is never a label,
 image-content or annotation change and does not supersede snapshots.
 Only filenames (never full computer paths) are stored for display.
 """
+
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
@@ -55,6 +56,7 @@ def save(data: dict, root: Path = ROOT) -> None:
 def _names_of(row: dict, entry: dict | None) -> set[str]:
     import json
     import re
+
     names = set()
     for original in json.loads(row.get('original_paths') or '[]'):
         text = str(original).replace('\\', '/')
@@ -81,11 +83,49 @@ def variants(rows: list[dict], data: dict) -> dict[str, list[str]]:
     return {ident: sorted({other for n in values for other in by_name[n]} - {ident}) for ident, values in names.items()}
 
 
-def lookup(image_id: str, data: dict | None = None, root: Path = ROOT) -> dict:
+def origin(row: dict, entry: dict | None) -> str:
+    """Where a photo came from: 'line', 'gangshan' or 'other'.  Photos of the old dataset folder
+    without an import alias still count as 岡山高醫 when their filename follows that hospital's
+    format, which only its own photos do."""
+    import json
+
+    from src.data import filename_rules
+
+    if row['image_id'].startswith('line_'):
+        return 'line'
+    if entry and entry.get('display_name'):
+        return 'gangshan'
+    paths = json.loads(row.get('original_paths') or '[]')
+    return 'gangshan' if any(filename_rules.record_code(str(p).replace('\\', '/')) for p in paths) else 'other'
+
+
+def original_name(row: dict) -> str | None:
+    """Filename from a photo's original path, for photos without an import alias."""
+    import json
+
+    for original in sorted(json.loads(row.get('original_paths') or '[]')):
+        text = str(original).replace('\\', '/')
+        if not text.startswith(('research_asset:', 'research_intake:')):
+            return PurePosixPath(text).name
+    return None
+
+
+def lookup(image_id: str, data: dict | None = None, root: Path = ROOT, row: dict | None = None) -> dict:
     data = data if data is not None else load(root)
     entry = data['images'].get(image_id)
     if not entry:
-        return {'display_name': None, 'aliases': [], 'display_conflict': False}
-    return {'display_name': entry.get('display_name'), 'display_conflict': bool(entry.get('conflict')),
-            'aliases': [{'source': a['source'], 'relative_path': a['relative_path'], 'filename': a['filename'],
-                         'batch': a.get('batch'), 'rule': a.get('label_rule')} for a in entry['aliases']]}
+        return {'display_name': original_name(row) if row else None, 'aliases': [], 'display_conflict': False}
+    return {
+        'display_name': entry.get('display_name'),
+        'display_conflict': bool(entry.get('conflict')),
+        'aliases': [
+            {
+                'source': a['source'],
+                'relative_path': a['relative_path'],
+                'filename': a['filename'],
+                'batch': a.get('batch'),
+                'rule': a.get('label_rule'),
+            }
+            for a in entry['aliases']
+        ],
+    }

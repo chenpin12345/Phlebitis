@@ -57,10 +57,10 @@ TypeScript＋Vite正式建置成功。Edge headless實際操作了總覽、資�
 
 ## 保存與原資料核對
 
-- 重新核對封存：**166個檔案，0雜湊差異**，見 [workbench-archive-check.json](workbench-archive-check.json)。
+- 重新核對封存：**166個檔案，0雜湊差異**，見 [workbench-archive-check.json](verification/2026-09-28_工作台驗收/workbench-archive-check.json)。
 - 原 `models/selected/best.pt` 與原metadata雜湊一致；新增模型皆為候選，沒有建立LINE active reference，也沒有傳真實訊息。
 - 既有91筆資料分類與原始圖不變。研究回收的新增案例明確標為合成，驗收後撤回。
-- 固定回歸工作保留人工標籤、功能、容許條件、耗時與基準差異；合成案例不能作模型效能證據。實際回歸執行見 [workbench-regression-evidence.json](workbench-regression-evidence.json)。
+- 固定回歸工作保留人工標籤、功能、容許條件、耗時與基準差異；合成案例不能作模型效能證據。實際回歸執行見 [workbench-regression-evidence.json](verification/2026-09-28_工作台驗收/workbench-regression-evidence.json)。
 
 ## 仍需真實資料／外部環境完成的工作
 
@@ -69,4 +69,4 @@ TypeScript＋Vite正式建置成功。Edge headless實際操作了總覽、資�
 3. 五模型短程訓練只驗證功能。正式模型效能、品質拒答規則、跨個案泛化與所需資料量尚未驗證；不提供嚴重度分級。
 4. 現有GPU環境已驗收；完整安裝腳本未在另一台全新Windows電腦實跑。公開登入管理與多人部署不在本地單機範圍。
 
-操作方式、架構、保存政策與限制見 [WORKBENCH.md](WORKBENCH.md)。
+操作方式、架構、保存政策與限制見 [WORKBENCH.md](../操作與交付說明/WORKBENCH.md)。

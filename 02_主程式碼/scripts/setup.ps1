@@ -18,5 +18,9 @@ if (Test-Path -LiteralPath "requirements.lock.txt") { $requirementsFile = "requi
 if ($LASTEXITCODE -ne 0) { throw "Project dependencies installation failed." }
 & $pythonExe -m pip check
 if ($LASTEXITCODE -ne 0) { throw "Dependency conflict detected." }
+$workspaceRoot = Split-Path $projectRoot -Parent
+if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath (Join-Path $workspaceRoot ".git"))) {
+    & git -C $workspaceRoot config core.hooksPath "$(Split-Path $projectRoot -Leaf)/scripts/githooks"
+}
 & $pythonExe -m src doctor
 if ($LASTEXITCODE -ne 0) { throw "Environment inspection failed." }

@@ -1,5 +1,10 @@
 # 模型與實驗
 
-模型目錄、實驗、工作摘要、比較、模型版本與曲線。extras 暫保留既有研究共用元件，避免不必要重寫。
+`ModelsPage.tsx` 是分頁容器：模型目錄、新增快照、建立實驗、工作監測、評估比較（`comparison.tsx`）、模型版本、訓練曲線。
 
-程式碼與文件納入版本控制；不接受照片、權重或金鑰。測試見 tests/test_performance_imports.py 與 web/import-regression.mjs。
+- `evaluation.tsx`：評估摘要（95% 信賴區間與白話說明）、混淆矩陣、錯誤照片與熱圖、模型說明卡。
+- `monitor.tsx`：工作詳情、產物與設定、訓練曲線。
+- `release.tsx`：模型卡上的「用於 LINE」與影子模式（C2）。
+- `extras.tsx`：共用的參數欄位、保存政策與獨立評估。
+
+外部訓練的模型會在模型說明卡與版本摘要標示「外部訓練的模型」。

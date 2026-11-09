@@ -2,55 +2,72 @@
 
 This module is the single rule source for every API, page and snapshot builder.
 
-Two independent work areas share one image catalogue:
-  * the YOLO area (lesion detection): boxes / confirmed no-lesion / not annotated,
-    reviewed through ``det_review``;
-  * the classification area (other models): binary and stage labels, reviewed
-    through ``cls_review``.
-Neither area reads the other's labels or review state.  ``status`` only records
-where the file is stored and is derived from the two area states.
+Photos are reviewed in one work area: whole-photo classification (binary and stage labels),
+reviewed through ``cls_review``.  ``status`` only records where the file is stored and is
+derived from that review state.
 
 Binary labels keep the legacy ``label_state`` meaning (positive/negative/unknown).
 Stage labels use the user-provided rule (normal / stage1 / stage2); it is not
 claimed to be any published clinical grading standard.
 """
+
 from __future__ import annotations
+
+import hashlib
+import random
 
 from src.workbench.storage import digest
 
 # Manifest columns added after schema 2. Empty or missing values mean "not yet set";
 # they are excluded from the row revision so pre-existing review history still matches.
-OPTIONAL_COLUMNS = ('stage_label', 'detection_state', 'label_scheme', 'quality_state', 'usage_state', 'cls_review', 'det_review')
+OPTIONAL_COLUMNS = (
+    'stage_label',
+    'label_scheme',
+    'quality_state',
+    'usage_state',
+    'cls_review',
+)
+# Removed in 2026-11 together with lesion detection. Older review records still carry them, so
+# they stay out of the row revision or those records would stop matching the current rows.
+RETIRED_COLUMNS = ('yolo_path', 'det_review', 'detection_state')
+# Who a photo belongs to is not part of its label review: filling these must not detach reviews.
+GROUP_COLUMNS = ('subject_id', 'group_verified')
 
 STAGES = ('normal', 'stage1', 'stage2', 'positive_unstaged', 'unknown')
-DETECTION_STATES = ('boxes', 'no_target', 'not_annotated')
 QUALITY = ('', 'acceptable', 'limited', 'unusable')
 USAGE = ('', 'active', 'test_only', 'withdrawn')
-AREAS = ('cls', 'det')
+AREAS = ('cls',)
 AREA_STATES = ('pending', 'confirmed', 'excluded')
-AREA_COLUMN = {'cls': 'cls_review', 'det': 'det_review'}
+AREA_COLUMN = {'cls': 'cls_review'}
 DECISION_STATE = {'approve': 'confirmed', 'exclude': 'excluded', 'needs_changes': 'pending', 'reopen': 'pending'}
 STATE_DECISION = {'confirmed': 'approve', 'excluded': 'exclude', 'pending': 'needs_changes'}
 
-TASKS = ('binary_classification', 'stage_classification', 'detection')
-TASK_AREA = {'binary_classification': 'cls', 'stage_classification': 'cls', 'detection': 'det'}
-TASK_NAMES = {'binary_classification': '二分類（正常／陽性）', 'stage_classification': '分期分類（正常／第一期／第二期）', 'detection': '病灶偵測'}
-SCHEMES = {
-    'binary_v1': {'task': 'binary_classification', 'classes': ['negative', 'positive'], 'version': 1,
-                  'description': '二分類：negative=0（正常），positive=1（陽性）。舊模型與舊快照固定使用此方案。'},
-    'stage_v1': {'task': 'stage_classification', 'classes': ['normal', 'stage1', 'stage2'], 'version': 1,
-                 'description': '使用者提供之分期規則：normal=0、stage1=1（第一期）、stage2=2（第二期）。非已驗證的臨床分級標準。'},
-    'detection_v1': {'task': 'detection', 'classes': ['phlebitis'], 'version': 1,
-                     'description': '單類別病灶框；確認無病灶的照片使用空標註。框不帶分期。'},
+TASKS = ('binary_classification', 'stage_classification')
+TASK_AREA = {'binary_classification': 'cls', 'stage_classification': 'cls'}
+TASK_NAMES = {
+    'binary_classification': '二分類（正常／陽性）',
+    'stage_classification': '分期分類（正常／第一期／第二期）',
 }
-TASK_SCHEME = {'binary_classification': 'binary_v1', 'stage_classification': 'stage_v1', 'detection': 'detection_v1'}
+SCHEMES = {
+    'binary_v1': {
+        'task': 'binary_classification',
+        'classes': ['negative', 'positive'],
+        'version': 1,
+        'description': '二分類：negative=0（正常），positive=1（陽性）。舊模型與舊快照固定使用此方案。',
+    },
+    'stage_v1': {
+        'task': 'stage_classification',
+        'classes': ['normal', 'stage1', 'stage2'],
+        'version': 1,
+        'description': '使用者提供之分期規則：normal=0、stage1=1（第一期）、stage2=2（第二期）。非已驗證的臨床分級標準。',
+    },
+}
+TASK_SCHEME = {'binary_classification': 'binary_v1', 'stage_classification': 'stage_v1'}
 STAGE_TO_BINARY = {'normal': 'negative', 'stage1': 'positive', 'stage2': 'positive', 'positive_unstaged': 'positive'}
 
 REASONS = {
-    'cls_pending': '尚未在其他模型分類區完成確認',
-    'cls_excluded': '已在其他模型分類區排除',
-    'det_pending': '尚未在 YOLO 框選區完成確認',
-    'det_excluded': '已在 YOLO 框選區排除',
+    'cls_pending': '尚未完成分類確認',
+    'cls_excluded': '已排除',
     'integrity': '完整性檢查失敗',
     'withdrawn': '研究授權已撤回或停止使用',
     'test_only': '測試素材，不納入正式訓練',
@@ -59,7 +76,6 @@ REASONS = {
     'stage_unconfirmed': '分期尚未確認',
     'stage_unknown_positive': '陽性但分期未知（可用於二分類，不可用於分期）',
     'stage_conflict': '分期與二分類標籤矛盾',
-    'not_annotated': '尚未完成病灶框選（不等於確認無病灶）',
 }
 
 
@@ -69,29 +85,41 @@ def mapping(scheme: str) -> dict[str, int]:
 
 def row_revision(row: dict) -> str:
     """Revision of a manifest row; unset optional columns do not change it."""
-    return digest({k: v for k, v in row.items() if not (k in OPTIONAL_COLUMNS and not v) and k not in ('revision',)})
+    skipped = ('revision', *RETIRED_COLUMNS, *GROUP_COLUMNS)
+    return digest({k: v for k, v in row.items() if not (k in OPTIONAL_COLUMNS and not v) and k not in skipped})
+
+
+def shuffled_labels(split: dict, seed: int) -> dict:
+    """Control run (#4): training labels are permuted, validation keeps the truth.  A pipeline
+    without leakage scores about chance on such a run."""
+    train = split['members']['train']
+    order = random.Random(seed).sample(range(len(train)), len(train))
+    fields = ('label_state', 'stage_label', 'target')
+    shuffled = [{**m, **{k: train[n][k] for k in fields}} for m, n in zip(train, order)]
+    return {**split, 'members': {**split['members'], 'train': shuffled}}
+
+
+def group_key(row: dict) -> str:
+    """Patient key for snapshots and everything derived from them: the 病歷號 stays in the manifest."""
+    return 'patient_' + hashlib.sha256(row['subject_id'].encode('utf-8')).hexdigest()[:16]
 
 
 def area_state(row: dict, area: str) -> str:
-    """Review state of one work area. Rows written before the split inherit it from status."""
+    """Review state. Rows written before explicit states inherit it from status."""
     value = row.get(AREA_COLUMN[area]) or ''
     if value:
         return value
     return {'approved': 'confirmed', 'excluded': 'excluded'}.get(row.get('status'), 'pending')
 
 
-def storage_status(cls: str, det: str) -> str:
-    """Where the file lives: any confirmed area keeps it in approved storage."""
-    if 'confirmed' in (cls, det):
-        return 'approved'
-    if cls == det == 'excluded':
-        return 'excluded'
-    return 'pending_review'
+def storage_status(cls: str) -> str:
+    """Where the file lives, derived from its review state."""
+    return {'confirmed': 'approved', 'excluded': 'excluded'}.get(cls, 'pending_review')
 
 
 def effective(row: dict) -> dict:
-    """Effective labels per area. Explicit columns win; legacy rows keep their old meaning."""
-    cls, det = area_state(row, 'cls'), area_state(row, 'det')
+    """Effective labels. Explicit columns win; legacy rows keep their old meaning."""
+    cls = area_state(row, 'cls')
     binary = row.get('label_state') or 'unknown'
     stage = row.get('stage_label') or ''
     stage_source = 'confirmed' if stage else 'none'
@@ -102,30 +130,32 @@ def effective(row: dict) -> dict:
             stage, stage_source = 'positive_unstaged', 'legacy_binary'
         else:
             stage = 'unknown'
-    detection = row.get('detection_state') or ''
-    detection_source = 'confirmed' if detection else 'legacy'
-    if not detection:
-        # Legacy only (before migrate-tasks wrote explicit states): the old single form
-        # stored boxes for positives and empty labels for negatives.
-        if det == 'confirmed' and row.get('yolo_path'):
-            detection = 'boxes' if binary == 'positive' else 'no_target'
-        else:
-            detection = 'not_annotated'
-    return {'binary': binary, 'stage': stage, 'stage_source': stage_source, 'detection': detection,
-            'detection_source': detection_source, 'quality': row.get('quality_state') or '',
-            'usage': row.get('usage_state') or 'active', 'label_scheme': row.get('label_scheme') or '',
-            'cls_state': cls, 'det_state': det}
+    return {
+        'binary': binary,
+        'stage': stage,
+        'stage_source': stage_source,
+        'quality': row.get('quality_state') or '',
+        'usage': row.get('usage_state') or 'active',
+        'label_scheme': row.get('label_scheme') or '',
+        'cls_state': cls,
+    }
 
 
 def consistency_errors(row: dict) -> list[str]:
-    """Only checks inside one area; the two areas never constrain each other."""
+    """Binary and stage labels must agree."""
     e = effective(row)
-    if e['stage'] in STAGE_TO_BINARY and e['binary'] in ('positive', 'negative') and STAGE_TO_BINARY[e['stage']] != e['binary']:
+    if (
+        e['stage'] in STAGE_TO_BINARY
+        and e['binary'] in ('positive', 'negative')
+        and STAGE_TO_BINARY[e['stage']] != e['binary']
+    ):
         return [REASONS['stage_conflict']]
     return []
 
 
-def eligibility(row: dict, *, audit_error: str | None = None, review: dict | None = None, revoked: bool = False) -> dict:
+def eligibility(
+    row: dict, *, audit_error: str | None = None, review: dict | None = None, revoked: bool = False
+) -> dict:
     """Per-task eligibility with explicit reasons; never a single boolean."""
     e = effective(row)
     common = []
@@ -149,12 +179,7 @@ def eligibility(row: dict, *, audit_error: str | None = None, review: dict | Non
         stage.append(REASONS['stage_unknown_positive'])
     elif e['stage'] not in ('normal', 'stage1', 'stage2'):
         stage.append(REASONS['stage_unconfirmed'])
-    detection = list(common)
-    if e['det_state'] != 'confirmed':
-        detection.append(REASONS['det_excluded' if e['det_state'] == 'excluded' else 'det_pending'])
-    if e['detection'] == 'not_annotated':
-        detection.append(REASONS['not_annotated'])
-    result = {'binary_classification': binary, 'stage_classification': stage, 'detection': detection}
+    result = {'binary_classification': binary, 'stage_classification': stage}
     return {task: {'eligible': not reasons, 'reasons': reasons} for task, reasons in result.items()}
 
 
@@ -165,8 +190,6 @@ def target(row: dict, task: str) -> str:
         return e['binary']
     if task == 'stage_classification':
         return e['stage']
-    if task == 'detection':
-        return 'phlebitis' if e['detection'] == 'boxes' else 'background'
     raise ValueError('Unknown task')
 
 

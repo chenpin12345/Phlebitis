@@ -1,5 +1,3 @@
-# 匯入互動
+# 匯入對話框
 
-只列批次，明確掃描、預覽與確認。操作 ID 可在最近紀錄中重新開啟。
-
-程式碼與文件納入版本控制；不接受照片、權重或金鑰。測試見 tests/test_performance_imports.py 與 web/import-regression.mjs。
+`ImportPanel.tsx`：列出 `05_匯入區/photos/` 或 `05_匯入區/models/` 的批次，明確掃描、預覽、確認；岡山高醫外部來源的比對與補入也在這裡。操作 ID 可在最近紀錄重新開啟。後端是 `src/imports/`。

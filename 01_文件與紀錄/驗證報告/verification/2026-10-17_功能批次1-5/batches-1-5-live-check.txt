@@ -1,0 +1,2 @@
+steps 5 unread 1 backups 1 due False
+{'det': (24, 24), 'cls': (56, 56)}

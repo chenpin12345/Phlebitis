@@ -1,6 +1,6 @@
 # 本次實作與執行紀錄
 
-> 本頁以下為 **2026-09-25 原版交付的歷史紀錄**。2026-09-28 五模型網頁工作台的最新功能、實測與限制，請見 [WORKBENCH.md](WORKBENCH.md) 和 [WORKBENCH_ACCEPTANCE.md](WORKBENCH_ACCEPTANCE.md)。原 YOLO11n 權重與六組訓練未被覆寫。
+> 本頁以下為 **2026-09-25 原版交付的歷史紀錄**。2026-09-28 五模型網頁工作台的最新功能、實測與限制，請見 [WORKBENCH.md](../操作與交付說明/WORKBENCH.md) 和 [WORKBENCH_ACCEPTANCE.md](../驗證報告/WORKBENCH_ACCEPTANCE.md)。原 YOLO11n 權重與六組訓練未被覆寫。
 
 更新日期：2026-09-25。使用者指定保留 YOLO 模型版本，並選擇先完成本地版本，LINE 真實帳號設定稍後補。
 
@@ -9,7 +9,7 @@
 | 項目 | 狀態與證據 |
 |---|---|
 | 資料資料夾分類 | 已完成，91 筆不同內容照片分為 24 可訓練、62 待確認、5 排除 |
-| 原始資料保留 | 166 份封存檔案雜湊一致，見 archive-integrity.json；基礎權重及原成果報告另保留 |
+| 原始資料保留 | 166 份封存檔案雜湊一致，見 ../驗證報告/verification/2026-09-25_初版驗收/archive-integrity.json；基礎權重及原成果報告另保留 |
 | 本地 GPU 環境 | 已完成，RTX 5050 Laptop、Python 3.12、PyTorch 2.13.0+cu130 |
 | YOLO 版本 | 所有訓練維持 YOLO11n，沒有升級模型架構 |
 | 分組訓練／增強比較 | 三折 × baseline/no_color 共六組已完成，每組最多 120 輪，連續 25 輪無改善提早停止 |
@@ -27,12 +27,12 @@
 
 | 折 | 設定 | 完成輪數 | mAP50 | mAP50–95 | TP / FN / FP / TN | 紀錄 |
 |---|---|---:|---:|---:|---|---|
-| 0 | baseline | 26 | 0.000313 | 0.000125 | 4 / 0 / 1 / 2 | [訓練](../runs/demo_baseline_20260925T022221248724Z/experiment.json) · [評估](../runs/evaluation_20260925T022310172051Z/evaluation.json) |
-| 0 | no_color | 71 | 0.024155 | 0.008540 | 0 / 4 / 1 / 2 | [訓練](../runs/demo_no_color_20260925T022313769711Z/experiment.json) · [評估](../runs/evaluation_20260925T022457491763Z/evaluation.json) |
-| 1 | baseline | 26 | 0.000440 | 0.000145 | 0 / 8 / 0 / 3 | [訓練](../runs/demo_baseline_20260925T022500972749Z/experiment.json) · [評估](../runs/evaluation_20260925T022545124167Z/evaluation.json) |
-| 1 | no_color | 29 | 0.042218 | 0.008465 | 0 / 8 / 0 / 3 | [訓練](../runs/demo_no_color_20260925T022548859716Z/experiment.json) · [評估](../runs/evaluation_20260925T022647298314Z/evaluation.json) |
-| 2 | baseline | 29 | 0.033359 | 0.005618 | 0 / 3 / 0 / 3 | [訓練](../runs/demo_baseline_20260925T022651156236Z/experiment.json) · [評估](../runs/evaluation_20260925T022737254723Z/evaluation.json) |
-| 2 | no_color | 35 | 0.019224 | 0.004903 | 0 / 3 / 0 / 3 | [訓練](../runs/demo_no_color_20260925T022739885650Z/experiment.json) · [評估](../runs/evaluation_20260925T022902295842Z/evaluation.json) |
+| 0 | baseline | 26 | 0.000313 | 0.000125 | 4 / 0 / 1 / 2 | 訓練（`runs/demo_baseline_20260925T022221248724Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022310172051Z/evaluation.json`，已清理） |
+| 0 | no_color | 71 | 0.024155 | 0.008540 | 0 / 4 / 1 / 2 | 訓練（`runs/demo_no_color_20260925T022313769711Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022457491763Z/evaluation.json`，已清理） |
+| 1 | baseline | 26 | 0.000440 | 0.000145 | 0 / 8 / 0 / 3 | 訓練（`runs/demo_baseline_20260925T022500972749Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022545124167Z/evaluation.json`，已清理） |
+| 1 | no_color | 29 | 0.042218 | 0.008465 | 0 / 8 / 0 / 3 | 訓練（`runs/demo_no_color_20260925T022548859716Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022647298314Z/evaluation.json`，已清理） |
+| 2 | baseline | 29 | 0.033359 | 0.005618 | 0 / 3 / 0 / 3 | 訓練（`runs/demo_baseline_20260925T022651156236Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022737254723Z/evaluation.json`，已清理） |
+| 2 | no_color | 35 | 0.019224 | 0.004903 | 0 / 3 / 0 / 3 | 訓練（`runs/demo_no_color_20260925T022739885650Z/experiment.json`，已清理） · 評估（`runs/evaluation_20260925T022902295842Z/evaluation.json`，已清理） |
 
 ### 三折平均與波動
 
@@ -58,10 +58,10 @@
 
 ## 執行證據與尚未驗收項目
 
-- 既有自動測試紀錄：2026-09-25 10:13 的 18 項測試通過，見 test-results.xml。這是先前測試快照，不代表後續修改已重新執行完整回歸。
+- 既有自動測試紀錄：2026-09-25 10:13 的 18 項測試通過，見 ../驗證報告/verification/2026-09-25_初版驗收/test-results.xml。這是先前測試快照，不代表後續修改已重新執行完整回歸。
 - 本次後續實際執行：本地 GPU 六組訓練、六組模型評估、中斷續訓、資料 audit、封存雜湊核對、套件依賴檢查與批次圖片預測。
 - 未執行真實 LINE API 傳訊、發布選單或建立公開通道；使用者已選擇之後再補。
 - Windows 選圖入口已建立；本次本地預測使用命令列執行，未操作人工選檔視窗。
 
-完整比較紀錄：[comparison.json](../runs/comparison_20260925T022218739647Z/comparison.json)。
-本地預測結果：[中文索引](../runs/prediction_20260925T022933263615Z/README.md) · [JSON](../runs/prediction_20260925T022933263615Z/results.json)。
+完整比較紀錄：comparison.json（`runs/comparison_20260925T022218739647Z/comparison.json`，已清理）。
+本地預測結果：中文索引（`runs/prediction_20260925T022933263615Z/README.md`，已清理） · JSON（`runs/prediction_20260925T022933263615Z/results.json`，已清理）。

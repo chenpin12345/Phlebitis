@@ -147,7 +147,7 @@
 - 圖片、資料快照、模型版本、references、dataset.yaml、runs 與 archive 不作整批路徑遷移。未修改 YOLO 版本或醫院可用圖片的呈現語意。
 - 新照片預設待人工審查、未知標籤；模型只接受服務端可核對來源，未知格式不反序列化。匯入不自動建立實驗、訓練、評估或切換引用。
 
-操作與目錄責任、照片／模型包格式、CLI、重試及索引重建見 [PERFORMANCE_IMPORTS.md](PERFORMANCE_IMPORTS.md)。
+操作與目錄責任、照片／模型包格式、CLI、重試及索引重建見 [PERFORMANCE_IMPORTS.md](../歷史紀錄/PERFORMANCE_IMPORTS.md)。
 
 ## 5. 限制與尚未驗證
 

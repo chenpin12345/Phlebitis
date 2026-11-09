@@ -1,42 +1,43 @@
-# 環境與建置產物
+# Version control covers code (02) and documents (01). Research data, models,
+# backups and imports stay out of git; only their README files are tracked.
+
+# Python and Node environments, caches and build output
 .venv/
-venv/
 __pycache__/
 .pytest_cache/
 node_modules/
-dist/
-test-results/
+02_主程式碼/web/dist/
+02_主程式碼/web/test-results/
+02_主程式碼/runtime/
 *.cache
 *.log
+*.lock
 
-# 金鑰
+# Secrets (LINE keys); the template .env.example is tracked
 .env
 
-# 病患影像、標註、模型與執行資料（隱私：不得上傳）
-/03_模型與影像資料/
-/data/
-/models/
-/runs/
-/runtime/
-/archive/
-/inbox/
-/靜脈炎_照片/
-/YOLODataset/
-*.jpg
-*.jpeg
-*.png
-*.bmp
-*.heic
-*.webp
-*.tif
-*.tiff
-*.pt
-*.onnx
-*.db
-*.sqlite*
+# The original project report may contain patient images
 *.docx
-*.pdf
-*.pptx
-*.xlsx
-*.csv
-*.zip
+
+# Data areas: folders are walked so their README files can be tracked
+03_模型與影像資料/**
+!03_模型與影像資料/**/
+!03_模型與影像資料/**/README.md
+# Old copies of code and data (their READMEs belong to those copies, not to this project)
+03_模型與影像資料/runtime/code_backups/
+03_模型與影像資料/archive/code_backups/
+03_模型與影像資料/archive/legacy/
+# Old backups waiting for the project owner to delete; they hold patient data
+03_模型與影像資料/待你刪除/
+04_備份/**
+!04_備份/**/
+!04_備份/**/README.md
+05_匯入區/**
+!05_匯入區/**/
+!05_匯入區/**/README.md
+!05_匯入區/範本/**
+
+# Settings-page screenshots show this computer's user folder; kept locally only
+01_文件與紀錄/驗證報告/verification/maintenance.png
+01_文件與紀錄/驗證報告/verification/maintenance-narrow.png
+01_文件與紀錄/驗證報告/verification/features-settings.png

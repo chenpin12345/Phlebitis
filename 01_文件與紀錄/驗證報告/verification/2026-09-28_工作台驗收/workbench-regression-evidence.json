@@ -1,0 +1,68 @@
+{
+  "purpose": "synthetic regression workflow, not model performance",
+  "artifact": "efficientnet_b0_120c0420c3194335",
+  "case": "f465130dd5a4438288672e12be6aa4dd",
+  "jobs": [
+    {
+      "id": "e9c6e7df6d98466d8471f780efa680b5",
+      "outcome": {
+        "case": "f465130dd5a4438288672e12be6aa4dd",
+        "revision": 1,
+        "expected": "not_detected",
+        "actual": "suspected",
+        "functional_pass": false,
+        "latency_ms": 283.15,
+        "latency_pass": true,
+        "score_range_pass": true,
+        "label_confirmed": true,
+        "model_correct": false,
+        "change": "no_matching_baseline",
+        "conversation": [
+          {
+            "event": 0,
+            "actual": "cancelled",
+            "expected": "cancelled",
+            "pass": true
+          },
+          {
+            "event": 1,
+            "actual": "cancelled",
+            "expected": "cancelled",
+            "pass": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "8966b28c479d4f759de587d5a2c3353d",
+      "outcome": {
+        "case": "f465130dd5a4438288672e12be6aa4dd",
+        "revision": 1,
+        "expected": "not_detected",
+        "actual": "suspected",
+        "functional_pass": false,
+        "latency_ms": 273.39,
+        "latency_pass": true,
+        "score_range_pass": true,
+        "label_confirmed": true,
+        "model_correct": false,
+        "change": "unchanged",
+        "conversation": [
+          {
+            "event": 0,
+            "actual": "cancelled",
+            "expected": "cancelled",
+            "pass": true
+          },
+          {
+            "event": 1,
+            "actual": "cancelled",
+            "expected": "cancelled",
+            "pass": true
+          }
+        ]
+      }
+    }
+  ],
+  "synthetic_asset_withdrawn": true
+}

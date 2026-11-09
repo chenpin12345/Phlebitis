@@ -1,0 +1,14 @@
+* text=auto
+# Windows launchers must keep CRLF line endings
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.pt binary
+*.safetensors binary
+*.npz binary
+# Git hooks run in sh and must keep LF line endings
+**/scripts/githooks/pre-commit text eol=lf

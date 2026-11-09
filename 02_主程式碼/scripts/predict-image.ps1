@@ -7,7 +7,7 @@ $pythonExe = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $storeDir = Get-ChildItem -LiteralPath (Join-Path $projectRoot "..") -Directory -Filter "03_*" -ErrorAction SilentlyContinue | Select-Object -First 1
 $storeRoot = if ($storeDir) { $storeDir.FullName } else { $projectRoot }
 if (-not (Test-Path -LiteralPath $pythonExe)) { throw "請先執行 scripts\setup.ps1 建立環境。" }
-if (-not (Test-Path -LiteralPath (Join-Path $storeRoot "models\selected\best.pt"))) { throw "請先完成訓練及 select 模型。" }
+if (-not (Test-Path -LiteralPath (Join-Path $storeRoot "models\references\local.json"))) { throw "尚未指定本地模擬模型：請先到工作台「模型版本」啟用。" }
 if (-not $ImagePath) {
     Add-Type -AssemblyName System.Windows.Forms
     $picker = New-Object System.Windows.Forms.OpenFileDialog
@@ -20,7 +20,7 @@ if (-not $ImagePath) {
     }
     finally { $picker.Dispose() }
 }
-Write-Host "本地研究展示：輸出疑似區域，不提供嚴重度分級。"
+Write-Host "本地研究展示：只做整張照片分類，不標出位置，也不提供嚴重度分級。"
 & $pythonExe -m src predict $ImagePath --device $Device --allow-demo
 if ($LASTEXITCODE -ne 0) { throw "分析失敗，請查看上方訊息。" }
 $latestResult = Get-ChildItem -LiteralPath (Join-Path $storeRoot "runs") -Directory |

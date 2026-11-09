@@ -1,19 +1,11 @@
 {
   "checks": [
     {
-      "name": "overview area card opens det with actual image IDs",
-      "passed": true
-    },
-    {
       "name": "overview area card opens cls with actual image IDs",
       "passed": true
     },
     {
-      "name": "deep link, reload, back/forward and area switch preserve view and actual data",
-      "passed": true
-    },
-    {
-      "name": "both areas share one layout structure",
+      "name": "deep link, reload, back/forward preserve view and actual data",
       "passed": true
     },
     {
@@ -21,34 +13,8 @@
       "passed": true
     },
     {
-      "name": "aspect ratio and responsive alignment: a_landscape",
+      "name": "classification review saves the stage",
       "passed": true
-    },
-    {
-      "name": "aspect ratio and responsive alignment: b_portrait",
-      "passed": true
-    },
-    {
-      "name": "aspect ratio and responsive alignment: c_square",
-      "passed": true
-    },
-    {
-      "name": "aspect ratio and responsive alignment: d_exif",
-      "passed": true
-    },
-    {
-      "name": "YOLO boxes do not change the classification area",
-      "passed": true
-    },
-    {
-      "name": "classification shows no boxes; its change keeps YOLO boxes; EXIF coordinates survive reload",
-      "passed": true,
-      "coords": [
-        "0.5",
-        "0.55",
-        "0.4",
-        "0.5"
-      ]
     },
     {
       "name": "reviewer filter and empty state per area",
@@ -79,7 +45,7 @@
       "passed": true
     },
     {
-      "name": "maintenance tables and audit filtering/pagination reset",
+      "name": "maintenance tables without the retired audit panel",
       "passed": true
     },
     {
@@ -95,15 +61,7 @@
       "passed": true
     },
     {
-      "name": "failed image disables editing",
-      "passed": true
-    },
-    {
       "name": "running experiment refresh and selection stops prior polling",
-      "passed": true
-    },
-    {
-      "name": "keyboard rectangle movement",
       "passed": true
     },
     {

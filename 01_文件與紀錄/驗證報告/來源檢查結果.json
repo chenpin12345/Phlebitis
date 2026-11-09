@@ -1,0 +1,240 @@
+{
+ "移除前_75張": {
+  "checked_at": "20261107T081718525674Z",
+  "photos": 121,
+  "labelled": 75,
+  "unreadable": 0,
+  "crosstab": [
+   {
+    "source": "gangshan",
+    "name": "岡山高醫",
+    "normal": 9,
+    "positive": 47,
+    "pending": 0,
+    "excluded": 28
+   },
+   {
+    "source": "other",
+    "name": "其他",
+    "normal": 19,
+    "positive": 0,
+    "pending": 18,
+    "excluded": 0
+   }
+  ],
+  "label_from_metadata": {
+   "balanced_accuracy": 0.748,
+   "shuffled_labels": 0.502,
+   "photos": 75,
+   "groups": 33
+  },
+  "label_from_colour": {
+   "balanced_accuracy": 0.631,
+   "shuffled_labels": 0.492,
+   "photos": 75,
+   "groups": 33
+  },
+  "source_from_metadata": {
+   "balanced_accuracy": 0.957,
+   "shuffled_labels": 0.511,
+   "photos": 75,
+   "groups": 33
+  },
+  "source_from_colour": {
+   "balanced_accuracy": 0.905,
+   "shuffled_labels": 0.517,
+   "photos": 75,
+   "groups": 33
+  },
+  "sizes": [
+   {
+    "size": "1477×1108",
+    "normal": 16,
+    "positive": 30
+   },
+   {
+    "size": "4032×3024",
+    "normal": 9,
+    "positive": 17
+   },
+   {
+    "size": "1706×960",
+    "normal": 3,
+    "positive": 0
+   }
+  ],
+  "level": "high",
+  "findings": [
+   "各來源的正常照片比例差很多（岡山高醫 16%、其他 100%），模型可能學到來源而不是病灶。",
+   "只看檔案資訊就能認出來源（平衡準確率 0.96）。",
+   "只看色彩就能認出來源（平衡準確率 0.91）。"
+  ]
+ },
+ "10月31日組成_88張": {
+  "checked_at": "20261107T081730394545Z",
+  "photos": 88,
+  "labelled": 88,
+  "unreadable": 0,
+  "crosstab": [
+   {
+    "source": "gangshan",
+    "name": "岡山高醫",
+    "normal": 9,
+    "positive": 60,
+    "pending": 0,
+    "excluded": 0
+   },
+   {
+    "source": "other",
+    "name": "其他",
+    "normal": 19,
+    "positive": 0,
+    "pending": 0,
+    "excluded": 0
+   }
+  ],
+  "label_from_metadata": {
+   "balanced_accuracy": 0.819,
+   "shuffled_labels": 0.464,
+   "photos": 88,
+   "groups": 33
+  },
+  "label_from_colour": {
+   "balanced_accuracy": 0.665,
+   "shuffled_labels": 0.513,
+   "photos": 88,
+   "groups": 33
+  },
+  "source_from_metadata": {
+   "balanced_accuracy": 0.961,
+   "shuffled_labels": 0.521,
+   "photos": 88,
+   "groups": 33
+  },
+  "source_from_colour": {
+   "balanced_accuracy": 0.92,
+   "shuffled_labels": 0.505,
+   "photos": 88,
+   "groups": 33
+  },
+  "sizes": [
+   {
+    "size": "1477×1108",
+    "normal": 16,
+    "positive": 33
+   },
+   {
+    "size": "4032×3024",
+    "normal": 9,
+    "positive": 27
+   },
+   {
+    "size": "1706×960",
+    "normal": 3,
+    "positive": 0
+   }
+  ],
+  "level": "high",
+  "findings": [
+   "各來源的正常照片比例差很多（岡山高醫 13%、其他 100%），模型可能學到來源而不是病灶。",
+   "只看檔案資訊就能分開正常與陽性（平衡準確率 0.82）。",
+   "只看檔案資訊就能認出來源（平衡準確率 0.96）。",
+   "只看色彩就能認出來源（平衡準確率 0.92）。"
+  ]
+ },
+ "移除後_56張": {
+  "checked_at": "20261107T081802480401Z",
+  "photos": 84,
+  "labelled": 56,
+  "unreadable": 0,
+  "crosstab": [
+   {
+    "source": "gangshan",
+    "name": "岡山高醫",
+    "normal": 9,
+    "positive": 47,
+    "pending": 0,
+    "excluded": 28
+   }
+  ],
+  "label_from_metadata": {
+   "balanced_accuracy": 0.691,
+   "shuffled_labels": 0.511,
+   "photos": 56,
+   "groups": 14
+  },
+  "label_from_colour": {
+   "balanced_accuracy": 0.44,
+   "shuffled_labels": 0.498,
+   "photos": 56,
+   "groups": 14
+  },
+  "source_from_metadata": null,
+  "source_from_colour": null,
+  "sizes": [
+   {
+    "size": "1477×1108",
+    "normal": 0,
+    "positive": 30
+   },
+   {
+    "size": "4032×3024",
+    "normal": 9,
+    "positive": 17
+   }
+  ],
+  "level": "watch",
+  "findings": [
+   "目前已核准照片只有一個來源，無法比較來源差異。",
+   "1477×1108 的 30 張全是陽性，這一類照片的處理方式可能不同（例如裁切）。"
+  ]
+ },
+ "移除檔名不符後_32張": {
+  "checked_at": "20261107T091135125568Z",
+  "photos": 60,
+  "labelled": 32,
+  "unreadable": 0,
+  "crosstab": [
+   {
+    "source": "gangshan",
+    "name": "岡山高醫",
+    "normal": 9,
+    "positive": 23,
+    "pending": 0,
+    "excluded": 28
+   }
+  ],
+  "label_from_metadata": {
+   "balanced_accuracy": 0.503,
+   "shuffled_labels": 0.49,
+   "photos": 32,
+   "groups": 8
+  },
+  "label_from_colour": {
+   "balanced_accuracy": 0.505,
+   "shuffled_labels": 0.464,
+   "photos": 32,
+   "groups": 8
+  },
+  "source_from_metadata": null,
+  "source_from_colour": null,
+  "sizes": [
+   {
+    "size": "4032×3024",
+    "normal": 9,
+    "positive": 17
+   },
+   {
+    "size": "1477×1108",
+    "normal": 0,
+    "positive": 6
+   }
+  ],
+  "level": "watch",
+  "findings": [
+   "目前已核准照片只有一個來源，無法比較來源差異。",
+   "1477×1108 的 6 張全是陽性，這一類照片的處理方式可能不同（例如裁切）。"
+  ]
+ },
+ "_更正": "10/31 的實際組成是「移除前_75張」；「10月31日組成_88張」多了 13 張重複副本。"
+}

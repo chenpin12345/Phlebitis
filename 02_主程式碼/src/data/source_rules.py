@@ -1,19 +1,17 @@
 """Apply an explicitly authorized filename rule to images from a configured source.
 
-The project owner authorized (2026-10-14) that 合作醫院 photos are classified from their
-filenames without per-image review.  Scope, in configs/import_sources.json:
-  * other-model (classification) area: binary + stage from the filename rule;
-  * YOLO area: filename 'normal' (_0) -> confirmed no lesion (empty label);
-    stage 1 / 2 stay pending until the user draws boxes.
-Never overwritten: human reviews of the same area, known labels that disagree,
-images already containing confirmed boxes, and excluded images.
+The project owner authorized (2026-10-14) that 岡山高醫 photos are classified from their
+filenames without per-image review (binary + stage from the filename rule; scope in
+configs/import_sources.json).
+Never overwritten: human reviews, known labels that disagree, and excluded images.
 Each change goes through dataset.review (journal, review log, evidence) and is idempotent.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
-from src.common import ROOT, read_json, read_manifest, stamp, write_json
+from src.common import ROOT, pre_change_dir, read_json, read_manifest, record_path, stamp, write_json
 from src.common import config_path
 from src.data import filename_rules, sources, tasks
 
@@ -21,24 +19,27 @@ REVIEWER = '依檔名規則（專案負責人授權）'
 SOURCE = 'authorized_filename_rule'
 
 
-def _human_reviews(image_id: str, area: str, root: Path) -> list[dict]:
+def _human_reviews(image_id: str, root: Path) -> list[dict]:
     items = []
     for path in sorted((root / 'data/reviews').glob(f'*_{image_id}.json')):
         item = read_json(path)
         if item.get('source') == SOURCE or item.get('after', {}).get('reviewer') == 'migration-audit':
             continue
-        touched = {'classification': 'cls', 'detection': 'det'}.get(item.get('task'), 'both')
-        if touched in (area, 'both'):
+        if item.get('task') != 'detection':
             items.append(item)
     return items
 
 
-def prefill_named_files(root: Path = ROOT, rule: str = 'yida_filename_v2') -> int:
+def prefill_named_files(root: Path = ROOT, rule: str | None = None) -> int:
     """Images NOT from the authorized source but carrying the same naming pattern in their
     original filenames get a suggestion only (to confirm in the classification area)."""
     import json
     from pathlib import PurePosixPath
     from src.data import evidence
+
+    if rule is None:
+        config = read_json(config_path('import_sources.json', root))['sources']
+        rule = next(s['label_rule'] for s in config.values() if s.get('auto_apply'))
     names = sources.load(root)['images']
     added = 0
     for row in read_manifest(root):
@@ -52,21 +53,33 @@ def prefill_named_files(root: Path = ROOT, rule: str = 'yida_filename_v2') -> in
             if parsed['value'] == 'unknown':
                 continue
             before = len(evidence.read(row['image_id'], root)['entries'])
-            evidence.append(row['image_id'], {'task': 'stage_classification', 'value': parsed['value'], 'method': 'rule_prefill', 'source': 'filename_pattern',
-                                               'rule_version': rule, 'relative_path': text, 'confirmation': 'pending_human_review',
-                                               'note': '非授權來源，只作預填，需人工確認'}, root, dedupe_key=f'{rule}:{row["sha256"]}:{text}')
+            evidence.append(
+                row['image_id'],
+                {
+                    'task': 'stage_classification',
+                    'value': parsed['value'],
+                    'method': 'rule_prefill',
+                    'source': 'filename_pattern',
+                    'rule_version': rule,
+                    'relative_path': text,
+                    'confirmation': 'pending_human_review',
+                    'note': '非授權來源，只作預填，需人工確認',
+                },
+                root,
+                dedupe_key=f'{rule}:{row["sha256"]}:{text}',
+            )
             added += len(evidence.read(row['image_id'], root)['entries']) > before
     return added
 
 
 def assign_candidate_groups(root: Path = ROOT) -> dict:
     """Give configured-source images without a group a candidate group from the filename's
-    bed/record code, so several photos of the same shot series never split across train and
-    validation.  Existing groups are kept; codes equal after removing hyphens reuse the
-    existing group name.  Candidate groups stay 'unverified' (group_verified is not changed)."""
+    record code.  Existing groups are kept; codes equal after removing hyphens reuse the
+    existing group name.  assign_subjects turns these into patients once a photo is approved."""
     import shutil
     from src.common import write_manifest
     from src.workbench.storage import dataset_lock
+
     names = sources.load(root)['images']
     config = read_json(config_path('import_sources.json', root))['sources']
     alias_sources = {s.get('alias_source', k) for k, s in config.items()}
@@ -80,7 +93,11 @@ def assign_candidate_groups(root: Path = ROOT) -> dict:
         for r in rows:
             if r.get('candidate_group') or r['image_id'] not in names:
                 continue
-            codes = {filename_rules.record_code(a['relative_path']) for a in names[r['image_id']].get('aliases', []) if a['source'] in alias_sources}
+            codes = {
+                filename_rules.record_code(a['relative_path'])
+                for a in names[r['image_id']].get('aliases', [])
+                if a['source'] in alias_sources
+            }
             codes.discard(None)
             if len(codes) != 1:
                 continue
@@ -90,21 +107,77 @@ def assign_candidate_groups(root: Path = ROOT) -> dict:
             changed.append({'image_id': r['image_id'], 'candidate_group': group})
         if not changed:
             return {'changed': 0}
-        backup = root / 'runtime/backups' / f'manifest-before-groups-{stamp()}.csv'
+        backup = pre_change_dir('manifest', root) / f'manifest-before-groups-{stamp()}.csv'
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / 'data/manifest.csv', backup)
         write_manifest(rows, root)
         record = root / 'data/migrations' / f'groups-{stamp()}.json'
-        write_json(record, {'schema_version': 1, 'migration': 'candidate_groups_from_filename_code', 'backup': backup.relative_to(root).as_posix(),
-                            'note': '候選分組（未核對病患身分），只用於避免同一系列照片跨訓練／驗證', 'changed': changed})
+        write_json(
+            record,
+            {
+                'schema_version': 1,
+                'migration': 'candidate_groups_from_filename_code',
+                'backup': record_path(backup, root),
+                'note': '檔名病歷號的候選分組',
+                'changed': changed,
+            },
+        )
     from src.workbench.queries import data_index
+
     data_index.invalidate(root)
-    return {'changed': len(changed), 'backup': backup.relative_to(root).as_posix(), 'record': record.relative_to(root).as_posix(), 'groups': sorted({c['candidate_group'] for c in changed})}
+    return {
+        'changed': len(changed),
+        'backup': record_path(backup, root),
+        'record': record.relative_to(root).as_posix(),
+        'groups': sorted({c['candidate_group'] for c in changed}),
+    }
+
+
+def assign_subjects(root: Path = ROOT) -> dict:
+    """Approved photos get their patient from the filename's 病歷號 (D12).  A patient set by a
+    person is kept.  Repeatable; photos without a code stay unassigned and block snapshots."""
+    import json
+    import shutil
+    from src.common import write_manifest
+    from src.workbench.storage import dataset_lock
+
+    with dataset_lock(root):
+        rows = read_manifest(root)
+        changed = 0
+        for r in rows:
+            if r['status'] != 'approved' or r.get('subject_id'):
+                continue
+            paths = [str(p).replace('\\', '/') for p in json.loads(r.get('original_paths') or '[]')]
+            codes = {filename_rules.record_code(p) for p in paths} - {None}
+            if len(codes) == 1:
+                r.update(subject_id=codes.pop(), group_verified='true')
+                changed += 1
+        if not changed:
+            return {'changed': 0}
+        backup = pre_change_dir('manifest', root) / f'manifest-before-subjects-{stamp()}.csv'
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / 'data/manifest.csv', backup)
+        write_manifest(rows, root)
+        write_json(
+            root / 'data/migrations' / f'subjects-{stamp()}.json',
+            {
+                'schema_version': 1,
+                'migration': 'subjects_from_filename_code',
+                'backup': record_path(backup, root),
+                'changed': changed,
+            },
+        )
+    from src.workbench.queries import data_index
+
+    data_index.invalidate(root)
+    return {'changed': changed, 'backup': record_path(backup, root)}
 
 
 def apply_authorized_rules(root: Path = ROOT) -> dict:
     from src.data.dataset import review
+
     groups = assign_candidate_groups(root)
+    assign_subjects(root)
     config = read_json(config_path('import_sources.json', root))['sources']
     names = sources.load(root)['images']
     rows = {r['image_id']: r for r in read_manifest(root)}
@@ -122,7 +195,11 @@ def apply_authorized_rules(root: Path = ROOT) -> dict:
             values = {p['value'] for p in parsed}
             item = {'image_id': image_id, 'name': aliases[0]['filename'], 'rule': source['label_rule']}
             if len(values) != 1 or 'unknown' in values:
-                item.update(cls='skipped', det='skipped', reason='檔名規則無法判定或多個來源檔名不一致：' + '；'.join(r for p in parsed for r in p['reasons']))
+                item.update(
+                    cls='skipped',
+                    reason='檔名規則無法判定或多個來源檔名不一致：'
+                    + '；'.join(r for p in parsed for r in p['reasons']),
+                )
                 results.append(item)
                 continue
             value = values.pop()
@@ -133,38 +210,39 @@ def apply_authorized_rules(root: Path = ROOT) -> dict:
                 item['cls'] = 'kept_excluded'
             elif e['binary'] in ('positive', 'negative') and e['binary'] != binary:
                 item['cls'] = 'conflict_kept_existing'
-            elif _human_reviews(image_id, 'cls', root) and (row.get('stage_label') or '') != value:
+            elif _human_reviews(image_id, root) and (row.get('stage_label') or '') != value:
                 item['cls'] = 'human_review_kept'
             elif e['cls_state'] == 'confirmed' and row.get('stage_label') == value and e['binary'] == binary:
                 item['cls'] = 'already'
             else:
-                row = review(image_id, task='classification', decision='approve', label=binary, stage=value, reviewer=REVIEWER, reason=reason, source=SOURCE, root=root)
+                row = review(
+                    image_id,
+                    decision='approve',
+                    label=binary,
+                    stage=value,
+                    reviewer=REVIEWER,
+                    reason=reason,
+                    source=SOURCE,
+                    root=root,
+                )
                 item['cls'] = 'applied'
-            e = tasks.effective(row)
-            if value != 'normal':
-                item['det'] = 'needs_boxes' if e['det_state'] != 'confirmed' else 'already'
-            elif row['status'] == 'excluded' or e['det_state'] == 'excluded':
-                item['det'] = 'kept_excluded'
-            elif e['detection'] == 'boxes':
-                item['det'] = 'conflict_kept_existing'
-            elif e['det_state'] == 'confirmed' and e['detection'] == 'no_target':
-                item['det'] = 'already'
-            elif _human_reviews(image_id, 'det', root):
-                item['det'] = 'human_review_kept'
-            else:
-                row = review(image_id, task='detection', decision='approve', detection='no_target', reviewer=REVIEWER, reason=reason, source=SOURCE, root=root)
-                item['det'] = 'applied'
             rows[image_id] = row
             item['value'] = value
             results.append(item)
     summary = {}
     for item in results:
-        for area in ('cls', 'det'):
-            summary[f"{area}:{item.get(area)}"] = summary.get(f"{area}:{item.get(area)}", 0) + 1
-    report = {'schema_version': 1, 'applied_at': stamp(), 'summary': summary, 'items': results, 'candidate_groups': groups}
-    if any(i.get('cls') == 'applied' or i.get('det') == 'applied' for i in results):
+        summary[f"cls:{item.get('cls')}"] = summary.get(f"cls:{item.get('cls')}", 0) + 1
+    report = {
+        'schema_version': 1,
+        'applied_at': stamp(),
+        'summary': summary,
+        'items': results,
+        'candidate_groups': groups,
+    }
+    if any(i.get('cls') == 'applied' for i in results):
         write_json(root / 'data/migrations' / f"rules-{report['applied_at']}.json", report)
         from src.workbench.queries import data_index
+
         data_index.invalidate(root)
         data_index.request_rebuild(root)
     return report

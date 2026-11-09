@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8,<10
+# Code formatting (scripts/check.ps1)
+black==25.1.0

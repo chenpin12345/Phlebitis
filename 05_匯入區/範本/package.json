@@ -1,0 +1,20 @@
+{
+  "_說明": "外部訓練模型的 package.json 範本。建議用 scripts/model_package.py export 自動產生；手動修改後請執行 scripts/model_package.py manifest <資料夾> 重新計算 files 的 SHA-256。以 _ 開頭的欄位會被忽略。",
+  "schema_version": 1,
+  "purpose": "inference",
+  "model": "yolo11n",
+  "_model 可選": ["yolo11n", "yolo11s", "yolo26s", "efficientnet_b0", "dinov2_small"],
+  "source": {
+    "type": "external",
+    "training_data": "請寫清楚訓練用的照片：來源、日期範圍、張數、是否依個案分組、是否與本專案驗證集重疊"
+  },
+  "config": {
+    "threshold": 0.5,
+    "imgsz": 640,
+    "postprocess": "nms"
+  },
+  "_config 說明": "分類模型（efficientnet_b0、dinov2_small）另加 \"label_scheme\": \"binary_v1\"（二分類）或 \"stage_v1\"（分期三類）；偵測模型（yolo）不加。",
+  "files": {
+    "model.safetensors": "由 scripts/model_package.py manifest 自動填入 SHA-256"
+  }
+}

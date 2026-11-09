@@ -2,11 +2,11 @@
 
 ## 環境
 
-本機已確認 NVIDIA RTX 5050 Laptop GPU、約 8 GB VRAM。使用 Python 3.12、PyTorch 2.13.0+cu130、torchvision 0.28.0+cu130、Ultralytics 8.4.161。具體版本見 environment.json 及 requirements.lock.txt。
+本機已確認 NVIDIA RTX 5050 Laptop GPU、約 8 GB VRAM。使用 Python 3.12、PyTorch 2.13.0+cu130、torchvision 0.28.0+cu130。具體版本見 environment.json 及 requirements.lock.txt。
 
-舊 CLI 保留 YOLO11n；工作台另支援 YOLO11s、YOLO26s、EfficientNet-B0 及 DINOv2 ViT-S/14＋logistic regression。各方案實作、參數、續訓和評估差異見 [工作台手冊](WORKBENCH.md)。預訓練權重與訓練後產物不可混用。
+工作台支援 EfficientNet-B0 及 DINOv2 ViT-S/14＋logistic regression，都是整張照片分類。YOLO 已在 2026-11 移除，當時成績見[YOLO 歷史成績](../驗證報告/YOLO歷史成績.md)。各方案實作、參數、續訓和評估差異見 [工作台手冊](WORKBENCH.md)。
 
-YOLO 預設 imgsz=640、batch=4、最多120 epochs、patience=25、seed=42、workers=0、amp=false。工作台可明確開啟 AMP 並同意框架自檢下載；分類有各自設定。CUDA 不可用會報錯，只有明確選擇 CPU 才用 CPU。
+CUDA 不可用時會明確失敗，不會自動改用 CPU；要用 CPU 請在建立實驗時選擇。
 
 ## 任務、快照與標籤方案
 
@@ -14,8 +14,8 @@ YOLO 預設 imgsz=640、batch=4、最多120 epochs、patience=25、seed=42、wor
 
 每個快照固定以下內容（`dataset_version.json` 的 schema 3）：
 
-- 一個任務：`detection`、`binary_classification` 或 `stage_classification`；
-- 類別對照與方案版本：`detection_v1`、`binary_v1`（negative=0、positive=1）或 `stage_v1`（normal=0、stage1=1、stage2=2）；
+- 一個任務：`binary_classification` 或 `stage_classification`；
+- 類別對照與方案版本：`binary_v1`（negative=0、positive=1）或 `stage_v1`（normal=0、stage1=1、stage2=2）；
 - 成員、分組、審查版本與證據雜湊。
 
 ```
@@ -23,14 +23,13 @@ YOLO 預設 imgsz=640、batch=4、最多120 epochs、patience=25、seed=42、wor
 ```
 
 - 分類快照的正規化影像每張只存一份，各折只列出成員。
-- 偵測快照沿用 YOLO 的目錄結構。
+- 新快照放在 `data/snapshots/`；2026-11 以前的快照留在舊位置，工作紀錄照舊讀取。
 - 類別或分組不足時會清楚拒絕，不會複製樣本或偽造分組。
 
-舊快照（schema 2）與沒有方案欄位的舊模型**永遠解讀為二分類**；positive=1 不會被當成第一期。
+沒有方案欄位的舊模型**永遠解讀為二分類**；positive=1 不會被當成第一期。schema 2 的舊快照不能再使用。
 
 模型與方案的對應：
 
-- YOLO 只能用於偵測。
 - EfficientNet-B0 與 DINOv2 可用於二分類或分期。分期時輸出三類 softmax，以最高分類別判定；DINOv2 分期只支援 lbfgs（多項式邏輯斯迴歸）。
 
 評估指標依任務而不同：
@@ -43,66 +42,50 @@ YOLO 預設 imgsz=640、batch=4、最多120 epochs、patience=25、seed=42、wor
 
 ## 建立資料及訓練
 
+訓練都在工作台操作，命令列只有資料檢查與建立快照：
+
     .\.venv\Scripts\python.exe -m src audit
-    .\.venv\Scripts\python.exe -m src build --demo
-    .\.venv\Scripts\python.exe -m src train --demo --epochs 2
-    .\.venv\Scripts\python.exe -m src train --demo --fold 0
-    .\.venv\Scripts\python.exe -m src train --demo --fold 0 --no-color
+    .\.venv\Scripts\python.exe -m src build --folds 3 --repeats 5
+    .\.venv\Scripts\python.exe -m src build --task stage_classification --folds 2 --repeats 5
 
-最後兩個指令為保守增強與關閉色彩擾動的比較。使用相同資料版本、折數、種子及最多輪數。可用 --batch 2 降低顯示記憶體需求。
+規則：
 
-若要完成所有折的實驗，分別執行 --fold 0、--fold 1、--fold 2，報告各折結果及變動，不只挑最高分。正式個案資訊確認後 build/train 不加 --demo；未核對資料會被阻擋。
+- `--demo` 只作流程展示，不能當正式成績。
+- 前瞻名單裡的測試與校準病人不會進訓練快照。
+- 建快照時會擋下：沒有病人分組、同一病人或近似照片跨折、某一折沒有正常病人。
+- 訓練跑滿固定輪數，驗證折不用來挑模型。
+- 二分類的門檻用訓練折內的預測決定，評估時不會重挑。
+- 每個模型都要和基線（多數類、色彩直方圖、DINOv2 最近鄰）一起比較；基線不能啟用。
+- 隨機標籤對照只驗證流程，模型不能啟用。
+- 目前第一期只有 2 位病人，分期只能用 2 折。
 
-資料集每次建立都有新版本；預設 train 使用最新資料集。重現舊實驗時用 --dataset 指定該次 experiment.json 記錄的資料集。移動專案位置後需重建虛擬環境並重新 build，不能沿用舊機器的資料集絕對路徑。
+## 中斷續訓與評估
 
-## 中斷續訓
+續訓與評估都在工作台操作。續訓鎖定原快照與參數；訓練完成後會自動排入評估，報告放在 `runs/workbench/evaluations/`。模型不會自動啟用，要由人在「模型版本」切換。
 
-    .\.venv\Scripts\python.exe -m src train --demo --resume runs/實驗名稱/weights/last.pt
+## 匯入在別處訓練的模型
 
-續訓必須使用相同資料清單與原始切分；程式會自動讀取原實驗的資料集。沒有新 epoch 的已完成模型不能用 resume 再開一輪。中斷發生於第一個 checkpoint 寫出之前，則需重新開始。
+在別台電腦或 Colab 訓練的模型可以匯入，但**不能直接放 `.pt` 檔**：`.pt`／`.pth` 是 pickle 格式，開啟時可以執行檔案中的任意程式碼。
 
-YOLO 完整訓練會留下 best.pt、last.pt、results.csv、曲線與 experiment.json。工作台續訓鎖定原快照與參數；修改即時審查備註不改動完整歷史快照。EfficientNet 保存分類 state 與 optimizer checkpoint；DINOv2 solver 重新擬合，無 checkpoint 續訓。
+1. 在訓練的那台電腦，用本專案程式把**自己訓練的**權重轉成 safetensors 模型包：
 
-## 評估與選定
+       .\.venv\Scripts\python.exe scripts\model_package.py export --model efficientnet_b0 --weights D:\訓練\model.pt --out D:\匯出\efficientnet_外部A --training-data "訓練資料的來源、日期、張數、是否依個案分組"
 
-    .\.venv\Scripts\python.exe -m src evaluate --weights runs/實驗名稱/weights/best.pt --fold 0
-    .\.venv\Scripts\python.exe -m src select --weights runs/實驗名稱/weights/best.pt --evaluation runs/評估名稱
+   另加 `--label-scheme binary_v1` 或 `stage_v1`。
+2. 把輸出資料夾複製到 `05_匯入區/models/`，在「模型與實驗 → 匯入模型」預覽並確認。
+3. 工作台依官方架構重建模型、以 strict 方式載入權重，登錄成新的、未評估的版本（`extra.source = external`）。架構或類別數不符時拒絕。
+4. 用本專案的快照評估。**沒有完整評估之前，本地模擬與 LINE 都不能啟用**。
 
-evaluate 產出：
-- detection_metrics：Precision、Recall、mAP50、mAP50–95 等框選指標。
-- image_level：是否出現任何框的影像層級 TP/FN/FP/TN、召回與正常影像誤報率。
-- error_examples：沒有框的陽性照片與有框的正常照片。
-- validation：PR、混淆矩陣與標註／預測對照。
-- images：各影像的分組、輸出框數與推論時間。
-
-影像層級有框不代表框的位置一定正確，因此須連同定位指標及預測對照查看。七張或十幾張照片上的數字會大幅波動，不能直接外推醫院使用表現。
-
-AP 評估使用 conf=0.001；展示預設 conf=0.5。更改展示門檻後，請以相同 --confidence 重跑 evaluate，再 select；不能把門檻數值當作嚴重度。
-
-select 只接受同一份權重的評估紀錄，保存權重雜湊與模型版本，不自動把任何新訓練的模型切換上線。
+外部模型可能用過本專案評估集裡的照片訓練，評估分數因此可能偏高；`--training-data` 請寫清楚，模型說明卡會顯示。細節見 [05_匯入區/models/README.md](../../05_匯入區/models/README.md)。
 
 ## 預測與 LINE
 
     .\.venv\Scripts\python.exe -m src predict data/approved/images --allow-demo
 
-預測圖片與 JSON 存在 runs/prediction_...。LINE 與命令列共用同一個分析模組。
+命令列使用「本地模擬」模型（`models/references/local.json`），結果 JSON 存在 runs/prediction_...。LINE 使用 `models/references/line.json`。兩者都只做整張照片分類，不標出位置。
 
 程式使用作業系統鎖避免訓練、命令列預測與 LINE 同時占用 GPU。請停止 LINE 再訓練；啟動 LINE 前等候訓練完成。
 
 ## 測試
 
     .\.venv\Scripts\python.exe -m pytest -q
-    .\.venv\Scripts\python.exe scripts/check_resume.py
-
-第二個指令會實際開始一個四輪小訓練，在第一個 checkpoint 中斷，再恢復至第四輪；不是一般單元測試，會產生 runs 紀錄。
-
-
-## 一次完成三折設定比較
-
-    .\.venv\Scripts\python.exe scripts/run_experiments.py --demo
-
-逐折執行 baseline 與 no_color，共六次訓練及評估。每次最多 120 輪，使用相同初始權重及種子；模型版本維持 YOLO11n。比較紀錄位置由 runs/latest_comparison.json 指向。
-
-選定規則事先固定：僅比較 fold 0 的兩個設定，選 mAP50–95 較高者，平手選正常影像誤報率較低者。其他兩折完整列出結果及波動，不以最高分折代替獨立測試集。選定只是本地研究展示用模型，不表示通過臨床效能門檻。
-
-本機影像、分組與資料量尚不足以支持實際醫療判斷。程式實作完成與模型辨識能力達標是兩個不同的驗收項目。

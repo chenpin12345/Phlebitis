@@ -11,5 +11,84 @@
   "fastapi": "0.141.1",
   "httpx": "0.28.1",
   "Pillow": "12.3.0",
-  "numpy": "2.5.2"
+  "numpy": "2.5.2",
+  "workspace": [
+    {
+      "key": "area-docs",
+      "name": "01 文件與紀錄",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\01_文件與紀錄",
+      "action": ""
+    },
+    {
+      "key": "area-code",
+      "name": "02 主程式碼",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\02_主程式碼",
+      "action": ""
+    },
+    {
+      "key": "area-storage",
+      "name": "03 模型與影像資料",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\03_模型與影像資料",
+      "action": ""
+    },
+    {
+      "key": "area-backups",
+      "name": "04 備份",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\04_備份",
+      "action": ""
+    },
+    {
+      "key": "area-inbox",
+      "name": "05 匯入區",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\05_匯入區",
+      "action": ""
+    },
+    {
+      "key": "git",
+      "name": "版本控制（git）",
+      "ok": true,
+      "detail": "程式與文件的修改紀錄",
+      "action": ""
+    },
+    {
+      "key": "commit-guard",
+      "name": "提交防護",
+      "ok": true,
+      "detail": "擋照片、權重、金鑰、病歷號進 git",
+      "action": ""
+    },
+    {
+      "key": "web",
+      "name": "網頁已建置",
+      "ok": true,
+      "detail": "web/dist/index.html",
+      "action": ""
+    },
+    {
+      "key": "source-gangshan",
+      "name": "外部來源：岡山高醫照片資料夾",
+      "ok": true,
+      "detail": "C:\\Users\\user\\Desktop\\Phlebitis\\05_匯入區\\岡山高醫",
+      "action": ""
+    },
+    {
+      "key": "daily-backup",
+      "name": "每日自動備份",
+      "ok": false,
+      "detail": "開啟；上次：2026-11-01 15:36（6 天前）；位置：C:\\Users\\user\\Desktop\\Phlebitis\\04_備份\\工作台紀錄",
+      "action": "開著工作台約 1 分鐘後會自動備份"
+    },
+    {
+      "key": "full-backup",
+      "name": "完整備份（照片與模型）",
+      "ok": null,
+      "detail": "位置：尚未設定；上次：從未",
+      "action": "接上外接硬碟，到設定頁「完整備份」設定位置後按「立即完整備份」"
+    }
+  ]
 }

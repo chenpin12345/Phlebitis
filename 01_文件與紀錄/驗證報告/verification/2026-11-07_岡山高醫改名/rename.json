@@ -1,0 +1,8 @@
+{
+  "date": "2026-11-07",
+  "from": "old folder name",
+  "to": "05_匯入區/岡山高醫",
+  "note": "digest covers relative paths, SHA-256, sizes and modified times; file names are left out because they contain record numbers",
+  "before": {"files": 78, "bytes": 76268356, "digest": "dee1303571436b36ddf8578a5224925f9a107d780e566cb6e879fd2465a903b9"},
+  "after": {"files": 78, "bytes": 76268356, "digest": "dee1303571436b36ddf8578a5224925f9a107d780e566cb6e879fd2465a903b9"}
+}

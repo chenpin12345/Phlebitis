@@ -1,17 +1,22 @@
 {
   "schema_version": 1,
-  "note": "Only these explicitly listed external folders may be read. They are scanned read-only; files are copied into inbox/photos and then managed by the normal import service. Source files are never moved, renamed, overwritten or deleted.",
+  "note": "Only these explicitly listed external folders may be read. Relative paths are relative to the workspace root (the folder holding workspace-layout.json). They are scanned read-only; files to add are copied into 03_模型與影像資料/runtime/imports/external and then managed by the normal import service. Source files are never moved, renamed, overwritten or deleted.",
   "sources": {
-    "yida": {
-      "name": "合作醫院照片資料夾",
-      "path": "C:\\path\\to\\external_source",
-      "label_rule": "yida_filename_v2",
-      "alias_source": "yida",
+    "gangshan": {
+      "name": "岡山高醫照片資料夾",
+      "path": "05_匯入區/岡山高醫",
+      "label_rule": "gangshan_filename_v3",
+      "alias_source": "gangshan",
       "auto_apply": true,
       "authorization": {
         "by": "專案負責人",
-        "date": "2026-10-14",
-        "scope": "合作醫院資料夾照片依檔名分類，免逐張人工審核：其他模型分類區直接採用檔名分期；YOLO 框選區中檔名為正常（_0）者設為確認無病灶，第一、二期仍需框選。既有人工結果與已排除照片不被覆蓋。"
+        "date": "2026-10-16",
+        "scope": "岡山高醫照片依檔名自動分類，免逐張審核（v3：另接受部位代碼 RL 與 11 位數開頭；分期仍只取部位後的數字）",
+        "previous": {
+          "by": "專案負責人",
+          "date": "2026-10-14",
+          "scope": "岡山高醫資料夾照片依檔名分類，免逐張人工審核：其他模型分類區直接採用檔名分期；YOLO 框選區中檔名為正常（_0）者設為確認無病灶，第一、二期仍需框選。既有人工結果與已排除照片不被覆蓋。"
+        }
       }
     }
   }

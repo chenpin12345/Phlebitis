@@ -4,6 +4,7 @@ Evidence records where a label came from (human review, a versioned filename rul
 legacy migration, LINE research intake).  Rule evidence is a suggestion only: it never
 becomes a confirmed label until a reviewer confirms it through ``dataset.review``.
 """
+
 from __future__ import annotations
 
 import re
@@ -41,12 +42,19 @@ def append(image_id: str, entry: dict, root: Path = ROOT, *, dedupe_key: str | N
 def suggestion(image_id: str, row: dict, root: Path = ROOT) -> dict | None:
     """Latest unconfirmed rule suggestion for the stage task, with conflict status."""
     data = read(image_id, root)
-    rules = [e for e in data['entries'] if e.get('method') == 'rule_prefill' and e.get('task') == 'stage_classification' and e.get('value') in ('normal', 'stage1', 'stage2')]
+    rules = [
+        e
+        for e in data['entries']
+        if e.get('method') == 'rule_prefill'
+        and e.get('task') == 'stage_classification'
+        and e.get('value') in ('normal', 'stage1', 'stage2')
+    ]
     if not rules:
         return None
     values = sorted({e['value'] for e in rules})
     latest = rules[-1]
     from src.data.tasks import STAGE_TO_BINARY, effective
+
     current = effective(row)
     conflict = len(values) > 1
     reasons = []
@@ -60,5 +68,12 @@ def suggestion(image_id: str, row: dict, root: Path = ROOT) -> dict | None:
         conflict = True
         reasons.append('規則分期與已確認分期不同（已確認標籤不會被覆蓋）')
     confirmed = bool(row.get('stage_label')) and row['stage_label'] == latest['value'] and not conflict
-    return {'value': latest['value'], 'values': values, 'rule': latest.get('rule_version'), 'source': latest.get('source'),
-            'conflict': conflict, 'conflict_reasons': reasons, 'confirmed': confirmed}
+    return {
+        'value': latest['value'],
+        'values': values,
+        'rule': latest.get('rule_version'),
+        'source': latest.get('source'),
+        'conflict': conflict,
+        'conflict_reasons': reasons,
+        'confirmed': confirmed,
+    }

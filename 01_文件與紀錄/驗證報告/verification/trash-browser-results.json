@@ -17,7 +17,7 @@
       "passed": true
     },
     {
-      "name": "empty exact filter, refresh and browser back",
+      "name": "empty exact filter, removed model label, refresh and browser back",
       "passed": true
     },
     {
@@ -25,7 +25,7 @@
       "passed": true
     },
     {
-      "name": "safe initial focus and Enter cancels without deleting",
+      "name": "one-click move without a preview dialog, undo from the toast",
       "passed": true
     },
     {
@@ -37,7 +37,7 @@
       "passed": true
     },
     {
-      "name": "audit explicit batch selection, typed purge and exact deletion",
+      "name": "trash select-all across pages, purge confirmed once without typing, runs in background and is announced",
       "passed": true
     },
     {
@@ -49,7 +49,7 @@
       "passed": true
     },
     {
-      "name": "responsive no overflow models?tab=compare&model=yolo11n",
+      "name": "responsive no overflow models?tab=compare&model=efficientnet_b0",
       "passed": true
     },
     {

@@ -1,31 +1,45 @@
 """Versioned filename label rules. Applied only to aliases of an explicitly configured
 source whose rule is named here; never to arbitrary future uploads.
 
-yida_filename_v1 (confirmed by the user for the 合作醫院 folder):
+gangshan_filename_v1 (confirmed by the user for the 岡山高醫 folder):
   <date>[ _]<bed/record code>_<side>_<stage>[_<sequence>].<ext>
   side LH / RH = left / right hand; recorded as source information only.
   stage 0 = normal, 1 = stage1 (第一期), 2 = stage2 (第二期).
   The trailing sequence number is a photo counter and never a stage.
-  The bed/record code is NOT a verified patient identity and is never used for grouping.
+  The record code is the patient's 病歷號 (confirmed by the project owner, 2026-11-07): the same
+  code is the same patient, with or without hyphens.  It may never leave the workbench.
 Anything not matching (other site codes, other stage digits, extra tokens) is 'unknown'.
 """
+
 from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
 
-RULES = {'yida_filename_v1', 'yida_filename_v2'}
+RULES = {'gangshan_filename_v1', 'gangshan_filename_v2', 'gangshan_filename_v3'}
 # v2 (project owner, 2026-10-14): LL is also a site code (stage read from the digit after it).
-SIDES_BY_RULE = {'yida_filename_v1': ('LH', 'RH'), 'yida_filename_v2': ('LH', 'RH', 'LL')}
-_PATTERN = re.compile(r'^(?P<date>\d{8,10})[ _](?P<code>.+?)_(?P<side>[A-Z]{2})_(?P<stage>\d+)(?:_(?P<seq>\d+))?$')
+# v3 (project owner, 2026-10-16): RL is also a site code (recorded as-is;
+# the stage still comes only from the digit after the site), and the leading date/serial may have 8-11 digits.
+SIDES_BY_RULE = {
+    'gangshan_filename_v1': ('LH', 'RH'),
+    'gangshan_filename_v2': ('LH', 'RH', 'LL'),
+    'gangshan_filename_v3': ('LH', 'RH', 'LL', 'RL'),
+}
+DATE_DIGITS = {'gangshan_filename_v1': 10, 'gangshan_filename_v2': 10, 'gangshan_filename_v3': 11}
+_PATTERN = re.compile(r'^(?P<date>\d{8,11})[ _](?P<code>.+?)_(?P<side>[A-Z]{2})_(?P<stage>\d+)(?:_(?P<seq>\d+))?$')
+# The format the hospital confirmed (2026-11-07): 日期_病歷號_部位_幾期_第幾張, 8-digit date, all
+# underscores.  Photos with any other name do not belong in the project.
+_STANDARD = re.compile(r'^\d{8}_[^_ ]+_[A-Z]{2}_\d+_\d+$')
 _STAGES = {'0': 'normal', '1': 'stage1', '2': 'stage2'}
 _SIDES = {'LH': '左手', 'RH': '右手'}
 
 
+def is_standard(relative_path: str) -> bool:
+    return bool(_STANDARD.match(PurePosixPath(relative_path).stem))
+
+
 def record_code(relative_path: str) -> str | None:
-    """Bed/record code from a 合作醫院-style filename, used only as a conservative candidate
-    group (never as a verified patient identity). Hyphens are dropped so that
-    'BED-03' and 'BED03' fall into the same group (merging is the safe direction)."""
+    """病歷號 from a 岡山高醫 filename, normalized so that 'ZZ12-01' and 'ZZ1201' are one patient."""
     match = _PATTERN.match(PurePosixPath(relative_path).stem)
     return match['code'].replace('-', '').upper() if match else None
 
@@ -40,9 +54,11 @@ def parse(rule: str, relative_path: str) -> dict:
         return result
     match = _PATTERN.match(path.stem)
     if not match:
-        result['reasons'].append('檔名不符合「日期_代碼_LH/RH_分期_序號」格式')
+        result['reasons'].append('檔名不符合「日期_代碼_部位_分期_序號」格式')
         return result
     side, stage = match['side'], match['stage']
+    if len(match['date']) > DATE_DIGITS[rule]:
+        result['reasons'].append(f'開頭日期 {len(match["date"])} 位數，超出規則（最多 {DATE_DIGITS[rule]} 位）')
     result.update(side=side, sequence=int(match['seq']) if match['seq'] else None, date=match['date'])
     if side not in SIDES_BY_RULE[rule]:
         result['reasons'].append(f'部位代碼 {side} 不在已確認規則（僅 {"／".join(SIDES_BY_RULE[rule])}）')

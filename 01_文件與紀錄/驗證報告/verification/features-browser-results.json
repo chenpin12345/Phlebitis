@@ -1,0 +1,113 @@
+{
+  "checks": [
+    {
+      "name": "overview next steps and finished-only content counts",
+      "passed": true
+    },
+    {
+      "name": "global search, keyboard shortcut and navigation",
+      "passed": true
+    },
+    {
+      "name": "notification bell opens and closes",
+      "passed": true
+    },
+    {
+      "name": "backup now and restore confirmation dialog",
+      "passed": true
+    },
+    {
+      "name": "disk usage lists old outputs and cleaning goes to the trash",
+      "passed": true
+    },
+    {
+      "name": "preferences saved",
+      "passed": true
+    },
+    {
+      "name": "quality and duplicate filters, marks and a human duplicate decision",
+      "passed": true
+    },
+    {
+      "name": "classification shortcuts and help dialog",
+      "passed": true
+    },
+    {
+      "name": "spot check dialog and hidden new-photo button",
+      "passed": true
+    },
+    {
+      "name": "photo cards with wrapped labels do not overlap",
+      "passed": true
+    },
+    {
+      "name": "photo moved to the trash with an impact preview and restored",
+      "passed": true
+    },
+    {
+      "name": "data trust page: source check and inventory",
+      "passed": true
+    },
+    {
+      "name": "prospective list is sealed and unlocked once; data card has no filenames",
+      "passed": true
+    },
+    {
+      "name": "three-fold option on by default",
+      "passed": true
+    },
+    {
+      "name": "independent test set checkbox (B5), off by default",
+      "passed": true
+    },
+    {
+      "name": "snapshot difference dialog",
+      "passed": true
+    },
+    {
+      "name": "report summary, error gallery and cross-validation list",
+      "passed": true
+    },
+    {
+      "name": "model and baseline comparison with patients, ledger count and calibration; no overflow at 390px",
+      "passed": true
+    },
+    {
+      "name": "model card folds long sections",
+      "passed": true
+    },
+    {
+      "name": "model card without release checklist (C1 removed)",
+      "passed": true
+    },
+    {
+      "name": "shadow mode toggle",
+      "passed": true
+    },
+    {
+      "name": "LINE usage statistics tab",
+      "passed": true
+    },
+    {
+      "name": "no horizontal overflow overview",
+      "passed": true
+    },
+    {
+      "name": "no horizontal overflow data?area=cls&view=all",
+      "passed": true
+    },
+    {
+      "name": "no horizontal overflow settings",
+      "passed": true
+    },
+    {
+      "name": "no horizontal overflow models?tab=registry",
+      "passed": true
+    },
+    {
+      "name": "no horizontal overflow intake?tab=stats",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

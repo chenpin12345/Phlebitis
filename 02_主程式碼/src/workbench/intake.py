@@ -8,6 +8,7 @@ data review is an explicit human action.  Withdrawal stops use immediately throu
 ``usage_revocations``; physical cleanup is a retryable background task.
 Retention is "until withdrawal" (no automatic expiry), as decided by the project owner.
 """
+
 from __future__ import annotations
 
 import io
@@ -45,13 +46,20 @@ def offer(source: str, root: Path | None = None) -> dict | None:
         return None
     if source == 'simulator' and not cfg.get('simulator_enabled'):
         return None
-    return {'version': cfg['current_version'], 'title': current['title'], 'text': current['text'], 'scope': current['scope'],
-            'retention': current.get('retention'), 'approved': bool(current.get('approved'))}
+    return {
+        'version': cfg['current_version'],
+        'title': current['title'],
+        'text': current['text'],
+        'scope': current['scope'],
+        'retention': current.get('retention'),
+        'approved': bool(current.get('approved')),
+    }
 
 
 def save_pending(raw: bytes, path: Path, config: dict) -> None:
     """Clean original kept only for the result lifetime so the user can decide on consent."""
     from src.inference.engine import decode_image
+
     image = decode_image(raw, config)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.tmp')
@@ -67,7 +75,23 @@ def _root(root):
     return Path(root) if root else ROOT
 
 
-def decide(*, source, simulated, user_key, session, event_id, message_id, result_token, version, decision, pending, prediction, home=None, root=None, clock=time.time) -> dict:
+def decide(
+    *,
+    source,
+    simulated,
+    user_key,
+    session,
+    event_id,
+    message_id,
+    result_token,
+    version,
+    decision,
+    pending,
+    prediction,
+    home=None,
+    root=None,
+    clock=time.time,
+) -> dict:
     """Record one consent decision. Idempotent per webhook event; one active consent per message."""
     if source not in SOURCES or decision not in ('accept', 'decline'):
         raise ValueError('Invalid consent decision')
@@ -82,14 +106,37 @@ def decide(*, source, simulated, user_key, session, event_id, message_id, result
         con.execute('BEGIN IMMEDIATE')
         if con.execute('SELECT 1 FROM research_consents WHERE event_id=?', (event_id,)).fetchone():
             return {'status': 'duplicate'}
-        active = con.execute("SELECT id FROM research_consents WHERE source=? AND message_id=? AND decision='accept' AND withdrawn_at IS NULL", (source, message_id)).fetchone()
+        active = con.execute(
+            "SELECT id FROM research_consents WHERE source=? AND message_id=? AND decision='accept' AND withdrawn_at IS NULL",
+            (source, message_id),
+        ).fetchone()
         if decision == 'accept' and active:
             return {'status': 'already', 'consent': active[0]}
         if decision == 'accept' and (pending is None or not Path(pending).is_file()):
             return {'status': 'expired'}
-        detail = {'consent_text_version': version, 'approved_version': expected['approved'], 'simulated': bool(simulated)}
-        con.execute('INSERT INTO research_consents(id,source,simulated,user_key,session,event_id,message_id,result_token,version,scope,decision,decided_at,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (ident, source, int(bool(simulated)), user_key, session, event_id, message_id, result_token, version, expected['scope'], decision, now, json.dumps(detail, ensure_ascii=False)))
+        detail = {
+            'consent_text_version': version,
+            'approved_version': expected['approved'],
+            'simulated': bool(simulated),
+        }
+        con.execute(
+            'INSERT INTO research_consents(id,source,simulated,user_key,session,event_id,message_id,result_token,version,scope,decision,decided_at,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (
+                ident,
+                source,
+                int(bool(simulated)),
+                user_key,
+                session,
+                event_id,
+                message_id,
+                result_token,
+                version,
+                expected['scope'],
+                decision,
+                now,
+                json.dumps(detail, ensure_ascii=False),
+            ),
+        )
         intake = None
         if decision == 'accept':
             intake = uuid.uuid4().hex
@@ -99,22 +146,69 @@ def decide(*, source, simulated, user_key, session, event_id, message_id, result
             shutil.copyfile(pending, target)
             with Image.open(target) as im:
                 im.verify()
-            con.execute('INSERT INTO research_intake(id,consent_id,asset_path,image_sha256,source,simulated,received_at,state,prediction,usage_state,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                        (intake, ident, f'research_intake/{intake}/original.jpg', sha256(target), source, int(bool(simulated)), now, 'received',
-                         json.dumps(prediction, ensure_ascii=False) if prediction else None, 'test_only' if simulated else 'active', now))
-    audit('research_consent', {'consent': ident, 'decision': decision, 'source': source, 'simulated': bool(simulated), 'intake': intake, 'version': version}, home=_home(home))
+            con.execute(
+                'INSERT INTO research_intake(id,consent_id,asset_path,image_sha256,source,simulated,received_at,state,prediction,usage_state,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                (
+                    intake,
+                    ident,
+                    f'research_intake/{intake}/original.jpg',
+                    sha256(target),
+                    source,
+                    int(bool(simulated)),
+                    now,
+                    'received',
+                    json.dumps(prediction, ensure_ascii=False) if prediction else None,
+                    'test_only' if simulated else 'active',
+                    now,
+                ),
+            )
+    audit(
+        'research_consent',
+        {
+            'consent': ident,
+            'decision': decision,
+            'source': source,
+            'simulated': bool(simulated),
+            'intake': intake,
+            'version': version,
+        },
+        home=_home(home),
+    )
     return {'status': 'recorded', 'consent': ident, 'intake': intake}
 
 
 def _revoke(con, row, reason, source_label, now):
     """Inside a transaction: stop all research use of one intake item immediately."""
-    con.execute("UPDATE research_intake SET usage_state='withdrawn',state='withdrawn',cleanup_state='pending',revision=revision+1,updated=? WHERE id=?", (now, row['id']))
-    con.execute("UPDATE research_consents SET withdrawn_at=COALESCE(withdrawn_at,?) WHERE id=?", (now, row['consent_id']))
-    for kind, value in (('intake', row['id']), ('consent', row['consent_id']), ('sha256', row['image_sha256']), ('image', row['promoted_image_id'])):
+    con.execute(
+        "UPDATE research_intake SET usage_state='withdrawn',state='withdrawn',cleanup_state='pending',revision=revision+1,updated=? WHERE id=?",
+        (now, row['id']),
+    )
+    con.execute(
+        "UPDATE research_consents SET withdrawn_at=COALESCE(withdrawn_at,?) WHERE id=?", (now, row['consent_id'])
+    )
+    for kind, value in (
+        ('intake', row['id']),
+        ('consent', row['consent_id']),
+        ('sha256', row['image_sha256']),
+        ('image', row['promoted_image_id']),
+    ):
         if value:
-            con.execute('INSERT OR IGNORE INTO usage_revocations(kind,ident,at,reason,source) VALUES(?,?,?,?,?)', (kind, value, now, reason, source_label))
-    con.execute('INSERT OR IGNORE INTO cleanup_tasks(id,kind,target,state,created,updated,detail) VALUES(?,?,?,?,?,?,?)',
-                ('withdraw:' + row['id'], 'research_withdrawal', row['id'], 'pending', now, now, json.dumps({'reason': reason, 'promoted_image_id': row['promoted_image_id']}, ensure_ascii=False)))
+            con.execute(
+                'INSERT OR IGNORE INTO usage_revocations(kind,ident,at,reason,source) VALUES(?,?,?,?,?)',
+                (kind, value, now, reason, source_label),
+            )
+    con.execute(
+        'INSERT OR IGNORE INTO cleanup_tasks(id,kind,target,state,created,updated,detail) VALUES(?,?,?,?,?,?,?)',
+        (
+            'withdraw:' + row['id'],
+            'research_withdrawal',
+            row['id'],
+            'pending',
+            now,
+            now,
+            json.dumps({'reason': reason, 'promoted_image_id': row['promoted_image_id']}, ensure_ascii=False),
+        ),
+    )
 
 
 def withdraw_user(*, source, user_key, event_id, reason='使用者撤回研究同意', home=None, clock=time.time) -> dict:
@@ -122,10 +216,16 @@ def withdraw_user(*, source, user_key, event_id, reason='使用者撤回研究�
     now = clock()
     with db(_home(home)) as con:
         con.execute('BEGIN IMMEDIATE')
-        rows = con.execute("SELECT i.* FROM research_intake i JOIN research_consents c ON c.id=i.consent_id WHERE c.source=? AND c.user_key=? AND c.decision='accept' AND c.withdrawn_at IS NULL", (source, user_key)).fetchall()
+        rows = con.execute(
+            "SELECT i.* FROM research_intake i JOIN research_consents c ON c.id=i.consent_id WHERE c.source=? AND c.user_key=? AND c.decision='accept' AND c.withdrawn_at IS NULL",
+            (source, user_key),
+        ).fetchall()
         for row in rows:
             _revoke(con, row, reason, f'{source}:{event_id}', now)
-        con.execute("UPDATE research_consents SET withdrawn_at=COALESCE(withdrawn_at,?),withdraw_event=COALESCE(withdraw_event,?) WHERE source=? AND user_key=? AND decision='accept'", (now, event_id, source, user_key))
+        con.execute(
+            "UPDATE research_consents SET withdrawn_at=COALESCE(withdrawn_at,?),withdraw_event=COALESCE(withdraw_event,?) WHERE source=? AND user_key=? AND decision='accept'",
+            (now, event_id, source, user_key),
+        )
     if rows:
         audit('research_withdrawal', {'source': source, 'count': len(rows), 'event': event_id}, home=_home(home))
         _refresh_index()
@@ -151,9 +251,102 @@ def withdraw_intake(ident, *, reason, actor, home=None, clock=time.time) -> dict
     return public(dict(row))
 
 
+def _usage_table(con):
+    con.execute(
+        'CREATE TABLE IF NOT EXISTS line_usage(id INTEGER PRIMARY KEY, at REAL, source TEXT, status TEXT, predicted_class TEXT, label_scheme TEXT, model_version TEXT, consent_offered INTEGER)'
+    )
+
+
+def record_usage(*, source, record, consent_offered, home=None, clock=time.time) -> None:
+    """One anonymous row per finished analysis (C3): no image, no user identifier."""
+    with db(_home(home)) as con:
+        _usage_table(con)
+        con.execute(
+            'INSERT INTO line_usage(at,source,status,predicted_class,label_scheme,model_version,consent_offered) VALUES(?,?,?,?,?,?,?)',
+            (
+                clock(),
+                source,
+                record.get('status'),
+                record.get('predicted_class'),
+                record.get('label_scheme'),
+                record.get('model_version'),
+                int(bool(consent_offered)),
+            ),
+        )
+
+
+def usage_stats(*, period='30', source='line', home=None, clock=time.time) -> dict:
+    """LINE usage statistics (C3) for 7 days, 30 days or everything."""
+    if period not in ('7', '30', 'all') or source not in ('line', 'simulator', ''):
+        raise ValueError('無效的期間或來源')
+    now = clock()
+    since = 0 if period == 'all' else now - int(period) * 86400
+    src = [source] if source else list(SOURCES)
+    marks = ','.join('?' * len(src))
+    with db(_home(home)) as con:
+        _usage_table(con)
+        rows = con.execute(
+            f'SELECT status,predicted_class,label_scheme,consent_offered,at FROM line_usage WHERE at>=? AND source IN ({marks})',
+            [since, *src],
+        ).fetchall()
+        decisions = dict(
+            con.execute(
+                f'SELECT decision,COUNT(*) FROM research_consents WHERE decided_at>=? AND source IN ({marks}) GROUP BY 1',
+                [since, *src],
+            ).fetchall()
+        )
+        received = con.execute(
+            f'SELECT COUNT(*) FROM research_intake WHERE received_at>=? AND source IN ({marks})', [since, *src]
+        ).fetchone()[0]
+        withdrawals = con.execute(
+            f"SELECT COUNT(*) FROM research_consents WHERE withdrawn_at IS NOT NULL AND withdrawn_at>=? AND decision='accept' AND source IN ({marks})",
+            [since, *src],
+        ).fetchone()[0]
+        states = dict(
+            con.execute(
+                f'SELECT state,COUNT(*) FROM research_intake WHERE received_at>=? AND source IN ({marks}) GROUP BY 1',
+                [since, *src],
+            ).fetchall()
+        )
+    analyses = len(rows)
+    status = {}
+    classes = {}
+    for r in rows:
+        status[r['status']] = status.get(r['status'], 0) + 1
+        if r['label_scheme'] == 'stage_v1' and r['predicted_class']:
+            classes[r['predicted_class']] = classes.get(r['predicted_class'], 0) + 1
+    accepted, declined = decisions.get('accept', 0), decisions.get('decline', 0)
+    days = 7 if period == '7' else 30 if period == '30' else 30
+    series = []
+    for i in range(days - 1, -1, -1):
+        lo = now - (i + 1) * 86400
+        hi = now - i * 86400
+        series.append({'start': lo, 'analyses': sum(lo <= r['at'] < hi for r in rows)})
+    return {
+        'period': period,
+        'source': source,
+        'analyses': analyses,
+        'status': status,
+        'classes': classes,
+        'quality_rejected': status.get('quality_rejected', 0),
+        'quality_rejected_rate': status.get('quality_rejected', 0) / analyses if analyses else None,
+        'consent_offered': sum(r['consent_offered'] for r in rows),
+        'accepted': accepted,
+        'declined': declined,
+        'consent_rate': accepted / (accepted + declined) if accepted + declined else None,
+        'received': received,
+        'withdrawals': withdrawals,
+        'intake_states': states,
+        'series': series,
+        'series_days': days,
+        'note': '統計只含完成分析的照片，不保存照片或使用者識別資料；模擬器資料只用於測試流程。',
+    }
+
+
 def _refresh_index():
     try:
         from src.workbench.queries import data_index
+
         data_index.invalidate(_root(None))
         data_index.request_rebuild(_root(None))
     except Exception:
@@ -170,50 +363,75 @@ def public(row: dict) -> dict:
 
 def query(*, source='', state='', usage='', label='', start='', end='', page=1, size=30, home=None) -> dict:
     from src.workbench.views import date_bounds
+
     if page < 1 or not 1 <= size <= 100:
         raise ValueError('無效的分頁')
     lo, hi = date_bounds(start, end)
-    clauses = ["NOT EXISTS (SELECT 1 FROM resource_lifecycle r WHERE r.type='research_photo' AND r.id=i.id AND r.state='purged')"]
+    clauses = [
+        "NOT EXISTS (SELECT 1 FROM resource_lifecycle r WHERE r.type='research_photo' AND r.id=i.id AND r.state='purged')"
+    ]
     values = []
     if source:
         if source not in SOURCES:
             raise ValueError('無效的來源')
-        clauses.append('i.source=?'); values.append(source)
+        clauses.append('i.source=?')
+        values.append(source)
     if state:
         if state not in STATES:
             raise ValueError('無效的處理狀態')
-        clauses.append('i.state=?'); values.append(state)
+        clauses.append('i.state=?')
+        values.append(state)
     if usage:
         if usage not in ('active', 'test_only', 'withdrawn'):
             raise ValueError('無效的授權狀態')
-        clauses.append('i.usage_state=?'); values.append(usage)
+        clauses.append('i.usage_state=?')
+        values.append(usage)
     if label:
-        clauses.append('(i.stage_label=? OR i.binary_label=?)'); values += [label, label]
+        clauses.append('(i.stage_label=? OR i.binary_label=?)')
+        values += [label, label]
     if lo is not None:
-        clauses.append('i.received_at>=?'); values.append(lo)
+        clauses.append('i.received_at>=?')
+        values.append(lo)
     if hi is not None:
-        clauses.append('i.received_at<?'); values.append(hi)
+        clauses.append('i.received_at<?')
+        values.append(hi)
     where = ' AND '.join(clauses)
     with db(_home(home)) as con:
         total = con.execute('SELECT COUNT(*) FROM research_intake i WHERE ' + where, values).fetchone()[0]
-        rows = con.execute('SELECT i.*,c.version AS consent_version,c.decided_at AS consent_at,c.withdrawn_at AS consent_withdrawn_at,c.scope AS consent_scope,'
-                           "COALESCE((SELECT state FROM resource_lifecycle r WHERE r.type='research_photo' AND r.id=i.id),'active') AS resource_state "
-                           'FROM research_intake i JOIN research_consents c ON c.id=i.consent_id WHERE ' + where + ' ORDER BY i.received_at DESC,i.id LIMIT ? OFFSET ?',
-                           values + [size, (page - 1) * size]).fetchall()
-        tasks = {r['target']: dict(r) for r in con.execute("SELECT target,state,attempts,error,updated FROM cleanup_tasks WHERE kind='research_withdrawal'")}
+        rows = con.execute(
+            'SELECT i.*,c.version AS consent_version,c.decided_at AS consent_at,c.withdrawn_at AS consent_withdrawn_at,c.scope AS consent_scope,'
+            "COALESCE((SELECT state FROM resource_lifecycle r WHERE r.type='research_photo' AND r.id=i.id),'active') AS resource_state "
+            'FROM research_intake i JOIN research_consents c ON c.id=i.consent_id WHERE '
+            + where
+            + ' ORDER BY i.received_at DESC,i.id LIMIT ? OFFSET ?',
+            values + [size, (page - 1) * size],
+        ).fetchall()
+        tasks = {
+            r['target']: dict(r)
+            for r in con.execute(
+                "SELECT target,state,attempts,error,updated FROM cleanup_tasks WHERE kind='research_withdrawal'"
+            )
+        }
     items = []
     for r in rows:
         item = public(dict(r))
         item['cleanup'] = tasks.get(r['id'])
         item['tasks'] = eligibility_preview(item)
         items.append(item)
-    return {'items': items, 'total': total, 'page': page, 'size': size,
-            'retention': '保存至撤回為止（專案負責人決定，無自動到期）', 'note': '模型預測僅供參考，不是標籤；人工確認後才可轉入資料審查。'}
+    return {
+        'items': items,
+        'total': total,
+        'page': page,
+        'size': size,
+        'retention': '保存至撤回為止（專案負責人決定，無自動到期）',
+        'note': '模型預測僅供參考，不是標籤；人工確認後才可轉入資料審查。',
+    }
 
 
 def eligibility_preview(item: dict) -> dict:
     """What the item could serve after promotion and data-review approval (not a training grant)."""
     from src.data.tasks import STAGE_TO_BINARY
+
     reasons = []
     if item['usage_state'] == 'withdrawn':
         reasons.append('研究授權已撤回')
@@ -223,10 +441,14 @@ def eligibility_preview(item: dict) -> dict:
         reasons.append('尚未完成人工確認')
     binary = list(reasons) + ([] if item['binary_label'] in ('positive', 'negative') else ['二分類標籤未確認'])
     stage = list(reasons) + ([] if item['stage_label'] in ('normal', 'stage1', 'stage2') else ['分期未確認'])
-    detection = list(reasons) + ['偵測需在資料審查中完成病灶框或確認無病灶']
-    if item['stage_label'] in STAGE_TO_BINARY and item['binary_label'] in ('positive', 'negative') and STAGE_TO_BINARY[item['stage_label']] != item['binary_label']:
-        binary.append('分期與二分類矛盾'); stage.append('分期與二分類矛盾')
-    return {'binary_classification': binary, 'stage_classification': stage, 'detection': detection}
+    if (
+        item['stage_label'] in STAGE_TO_BINARY
+        and item['binary_label'] in ('positive', 'negative')
+        and STAGE_TO_BINARY[item['stage_label']] != item['binary_label']
+    ):
+        binary.append('分期與二分類矛盾')
+        stage.append('分期與二分類矛盾')
+    return {'binary_classification': binary, 'stage_classification': stage}
 
 
 def get(ident, home=None) -> dict:
@@ -237,9 +459,24 @@ def get(ident, home=None) -> dict:
     return dict(row)
 
 
+def by_image(image_id, home=None) -> dict:
+    """Intake facts for a photo already promoted to data review (shown next to the editor).
+    The model prediction is reference only and is never used as a label."""
+    with db(_home(home)) as con:
+        row = con.execute(
+            'SELECT i.id,i.source,i.simulated,i.received_at,i.prediction,i.binary_label,i.stage_label,i.usage_state,i.reviewer,c.version '
+            'FROM research_intake i JOIN research_consents c ON c.id=i.consent_id WHERE i.promoted_image_id=?',
+            (image_id,),
+        ).fetchone()
+    if not row:
+        raise FileNotFoundError(image_id)
+    return public(dict(row))
+
+
 def image_path(ident, home=None) -> Path:
     """Management access only: withdrawn, trashed or purged photos are not served."""
     from src.workbench import resources
+
     row = get(ident, home)
     if row['usage_state'] == 'withdrawn':
         raise ValueError('研究授權已撤回，照片不再提供')
@@ -253,8 +490,22 @@ def image_path(ident, home=None) -> Path:
     return path
 
 
-def review(ident, *, revision, state, binary_label, stage_label, quality, subject_alias, subject_confirmed, note, actor, home=None) -> dict:
+def review(
+    ident,
+    *,
+    revision,
+    state,
+    binary_label,
+    stage_label,
+    quality,
+    subject_alias,
+    subject_confirmed,
+    note,
+    actor,
+    home=None,
+) -> dict:
     from src.data.tasks import STAGE_TO_BINARY, STAGES, QUALITY
+
     if state not in ('reviewed', 'needs_changes', 'rejected'):
         raise ValueError('無效的審查狀態')
     if binary_label not in ('positive', 'negative', 'unknown') or stage_label not in STAGES or quality not in QUALITY:
@@ -279,8 +530,10 @@ def review(ident, *, revision, state, binary_label, stage_label, quality, subjec
             raise ValueError('revision conflict: reload before saving')
         if row['usage_state'] == 'withdrawn' or row['state'] in ('promoted', 'withdrawn'):
             raise ValueError('已轉入或已撤回的項目不可再修改；請在資料審查處理')
-        con.execute('UPDATE research_intake SET state=?,binary_label=?,stage_label=?,quality=?,subject_alias=?,note=?,reviewer=?,revision=revision+1,updated=? WHERE id=?',
-                    (state, binary_label, stage_label, quality, alias, note[:1000], actor, time.time(), ident))
+        con.execute(
+            'UPDATE research_intake SET state=?,binary_label=?,stage_label=?,quality=?,subject_alias=?,note=?,reviewer=?,revision=revision+1,updated=? WHERE id=?',
+            (state, binary_label, stage_label, quality, alias, note[:1000], actor, time.time(), ident),
+        )
         row = con.execute('SELECT * FROM research_intake WHERE id=?', (ident,)).fetchone()
     audit('research_intake_review', {'intake': ident, 'state': state}, home=_home(home), actor=actor)
     return public(dict(row))
@@ -291,6 +544,7 @@ def promote(ident, *, revision, actor, home=None, root=None) -> dict:
     from src.data import evidence, revocations
     from src.data.dataset import recover_reviews
     from src.workbench.storage import dataset_lock
+
     if not actor:
         raise ValueError('請先設定操作者名稱')
     root = _root(root)
@@ -318,7 +572,9 @@ def promote(ident, *, revision, actor, home=None, root=None) -> dict:
         rows = read_manifest(root)
         existing = next((r for r in rows if r['sha256'] == value), None)
         if existing:
-            raise ValueError(f"相同內容已在資料集中（{existing['image_id']}）；不自動合併不同來源或個案身分，請人工確認")
+            raise ValueError(
+                f"相同內容已在資料集中（{existing['image_id']}）；不自動合併不同來源或個案身分，請人工確認"
+            )
         if row['subject_alias']:
             reserved = root / 'data/independent_test/manifest.json'
             if reserved.exists() and any(r.get('subject_id') == row['subject_alias'] for r in read_json(reserved)):
@@ -327,28 +583,78 @@ def promote(ident, *, revision, actor, home=None, root=None) -> dict:
         if target.exists():
             raise ValueError('轉入目的檔已存在；未變更任何檔案')
         target.parent.mkdir(parents=True, exist_ok=True)
-        fields = list(rows[0]) if rows else ['image_id', 'sha256', 'image_path', 'annotation_path', 'yolo_path', 'status', 'label_state', 'candidate_group', 'subject_id', 'group_verified', 'reviewer', 'reason', 'updated_at', 'original_paths']
+        fields = (
+            list(rows[0])
+            if rows
+            else [
+                'image_id',
+                'sha256',
+                'image_path',
+                'annotation_path',
+                'status',
+                'label_state',
+                'candidate_group',
+                'subject_id',
+                'group_verified',
+                'reviewer',
+                'reason',
+                'updated_at',
+                'original_paths',
+            ]
+        )
         record = {k: '' for k in fields}
-        record.update(image_id=image_id, sha256=value, image_path=target.relative_to(root).as_posix(), status='pending_review', label_state=row['binary_label'],
-                      stage_label=row['stage_label'] if row['stage_label'] in ('normal', 'stage1', 'stage2') else '', label_scheme='stage_v1' if row['stage_label'] in ('normal', 'stage1', 'stage2') else '',
-                      quality_state=row['quality'], usage_state='test_only' if row['simulated'] else '', candidate_group='', subject_id=row['subject_alias'],
-                      group_verified='true' if row['subject_alias'] else 'false', reviewer=actor, reason='LINE 研究收件轉入；待資料審查核准', updated_at=stamp(),
-                      original_paths=json.dumps(['research_intake:' + ident], ensure_ascii=False))
+        record.update(
+            image_id=image_id,
+            sha256=value,
+            image_path=target.relative_to(root).as_posix(),
+            status='pending_review',
+            label_state=row['binary_label'],
+            stage_label=row['stage_label'] if row['stage_label'] in ('normal', 'stage1', 'stage2') else '',
+            label_scheme='stage_v1' if row['stage_label'] in ('normal', 'stage1', 'stage2') else '',
+            quality_state=row['quality'],
+            usage_state='test_only' if row['simulated'] else '',
+            candidate_group='',
+            subject_id=row['subject_alias'],
+            group_verified='true' if row['subject_alias'] else 'false',
+            reviewer=actor,
+            reason='LINE 研究收件轉入；待資料審查核准',
+            updated_at=stamp(),
+            original_paths=json.dumps(['research_intake:' + ident], ensure_ascii=False),
+        )
         try:
             shutil.copyfile(source, target)
-            evidence.append(image_id, {'task': 'classification', 'source': 'line_research_simulated' if row['simulated'] else 'line_research', 'method': 'intake_review',
-                                       'actor': row['reviewer'], 'binary': row['binary_label'], 'stage': row['stage_label'], 'intake': ident,
-                                       'note': '收件人工確認；模型預測未作為標籤'}, root)
+            evidence.append(
+                image_id,
+                {
+                    'task': 'classification',
+                    'source': 'line_research_simulated' if row['simulated'] else 'line_research',
+                    'method': 'intake_review',
+                    'actor': row['reviewer'],
+                    'binary': row['binary_label'],
+                    'stage': row['stage_label'],
+                    'intake': ident,
+                    'note': '收件人工確認；模型預測未作為標籤',
+                },
+                root,
+            )
             write_manifest(rows + [record], root)
         except BaseException:
             target.unlink(missing_ok=True)
             raise
     with db(_home(home)) as con:
-        con.execute("UPDATE research_intake SET promoted_image_id=?,state='promoted',revision=revision+1,updated=? WHERE id=?", (image_id, time.time(), ident))
+        con.execute(
+            "UPDATE research_intake SET promoted_image_id=?,state='promoted',revision=revision+1,updated=? WHERE id=?",
+            (image_id, time.time(), ident),
+        )
     # A withdrawal that raced with promotion still wins.
     if get(ident, home)['usage_state'] == 'withdrawn':
         revocations.revoke('image', image_id, 'withdrawn during promotion', 'intake', root)
-    audit('research_intake_promote', {'intake': ident, 'image_id': image_id, 'simulated': bool(row['simulated'])}, home=_home(home), actor=actor)
+    audit(
+        'research_intake_promote',
+        {'intake': ident, 'image_id': image_id, 'simulated': bool(row['simulated'])},
+        home=_home(home),
+        actor=actor,
+    )
     _refresh_index()
     return {'image_id': image_id, 'status': 'promoted'}
 
@@ -360,9 +666,16 @@ def run_cleanup(home=None, root=None, limit=5) -> list[dict]:
     from src.workbench import managed_files, lifecycle
     from src.workbench.resources import resource_lock
     from src.workbench.storage import file_lock
+
     root = _root(root)
     with db(_home(home)) as con:
-        tasks = [dict(r) for r in con.execute("SELECT * FROM cleanup_tasks WHERE kind='research_withdrawal' AND state IN ('pending','retry') ORDER BY created LIMIT ?", (limit,))]
+        tasks = [
+            dict(r)
+            for r in con.execute(
+                "SELECT * FROM cleanup_tasks WHERE kind='research_withdrawal' AND state IN ('pending','retry') ORDER BY created LIMIT ?",
+                (limit,),
+            )
+        ]
     done = []
     for task in tasks:
         ident = task['target']
@@ -370,7 +683,11 @@ def run_cleanup(home=None, root=None, limit=5) -> list[dict]:
             row = get(ident, home)
             detail = json.loads(task['detail'])
             image_id = row['promoted_image_id'] or detail.get('promoted_image_id')
-            impact = lifecycle.related(ident, 'research_intake', root) if image_id else {'image_ids': [], 'files': [], 'snapshots': []}
+            impact = (
+                lifecycle.related(ident, 'research_intake', root)
+                if image_id
+                else {'image_ids': [], 'files': [], 'snapshots': []}
+            )
             if impact['image_ids'] or impact['files']:
                 with OperationLock(), resource_lock(), file_lock(root / 'runtime/data.lock'):
                     lifecycle.remove_derived(impact, 'Research consent withdrawn; research copies removed', root)
@@ -385,16 +702,34 @@ def run_cleanup(home=None, root=None, limit=5) -> list[dict]:
             except OSError:
                 pass
             with db(_home(home)) as con:
-                con.execute("UPDATE research_intake SET asset_path=NULL,cleanup_state='done',updated=? WHERE id=?", (time.time(), ident))
-                con.execute("UPDATE cleanup_tasks SET state='done',attempts=attempts+1,error=NULL,updated=?,detail=? WHERE id=?",
-                            (time.time(), json.dumps({**detail, 'impact': impact}, ensure_ascii=False), task['id']))
-            audit('research_withdrawal_cleanup', {'intake': ident, 'removed_image_ids': impact['image_ids'], 'snapshots': impact['snapshots']}, home=_home(home))
+                con.execute(
+                    "UPDATE research_intake SET asset_path=NULL,cleanup_state='done',updated=? WHERE id=?",
+                    (time.time(), ident),
+                )
+                con.execute(
+                    "UPDATE cleanup_tasks SET state='done',attempts=attempts+1,error=NULL,updated=?,detail=? WHERE id=?",
+                    (time.time(), json.dumps({**detail, 'impact': impact}, ensure_ascii=False), task['id']),
+                )
+            audit(
+                'research_withdrawal_cleanup',
+                {'intake': ident, 'removed_image_ids': impact['image_ids'], 'snapshots': impact['snapshots']},
+                home=_home(home),
+            )
             done.append({'id': ident, 'state': 'done'})
         except Exception as exc:
-            message = '運算或資料鎖忙碌，稍後自動重試' if isinstance(exc, RuntimeError) else type(exc).__name__ + ': ' + str(exc)
+            message = (
+                '運算或資料鎖忙碌，稍後自動重試'
+                if isinstance(exc, RuntimeError)
+                else type(exc).__name__ + ': ' + str(exc)
+            )
             with db(_home(home)) as con:
-                con.execute("UPDATE cleanup_tasks SET state='retry',attempts=attempts+1,error=?,updated=? WHERE id=?", (message[:500], time.time(), task['id']))
-                con.execute("UPDATE research_intake SET cleanup_state='retry',updated=? WHERE id=?", (time.time(), ident))
+                con.execute(
+                    "UPDATE cleanup_tasks SET state='retry',attempts=attempts+1,error=?,updated=? WHERE id=?",
+                    (message[:500], time.time(), task['id']),
+                )
+                con.execute(
+                    "UPDATE research_intake SET cleanup_state='retry',updated=? WHERE id=?", (time.time(), ident)
+                )
             done.append({'id': ident, 'state': 'retry', 'error': message})
     return done
 
@@ -405,9 +740,17 @@ def _flag_models(snapshots, ident, root):
         return
     from src.workbench import registry
     from src.workbench.storage import flag
+
     for path in registry.VERSIONS.glob('*/artifact.json'):
         artifact = read_json(path)
         dataset = artifact.get('extra', {}).get('dataset') or ''
-        if any(f'data/yolo/{s}/' in dataset.replace('\\', '/') for s in snapshots):
-            flag('model_attention:' + artifact['id'], {'reason': '訓練快照包含已撤回授權的研究照片；需重新評估或重訓。刪除原照片不會移除模型已學到的影響。',
-                                                       'intake': ident, 'snapshots': snapshots, 'at': stamp()})
+        if any(f'/{s}/' in dataset.replace('\\', '/') for s in snapshots):
+            flag(
+                'model_attention:' + artifact['id'],
+                {
+                    'reason': '訓練快照包含已撤回授權的研究照片；需重新評估或重訓。刪除原照片不會移除模型已學到的影響。',
+                    'intake': ident,
+                    'snapshots': snapshots,
+                    'at': stamp(),
+                },
+            )

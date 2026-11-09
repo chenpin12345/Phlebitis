@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stops photos, weights, secrets and patient record codes from entering git.
+# Enabled by setup.ps1 with: git config core.hooksPath <code folder>/scripts/githooks
+root=$(git rev-parse --show-toplevel)
+for code in "$root"/02_*; do
+    if [ -f "$code/scripts/check_commit_safety.py" ]; then
+        break
+    fi
+done
+python="$code/.venv/Scripts/python.exe"
+if [ ! -x "$python" ]; then
+    python=python
+fi
+exec "$python" -X utf8 "$code/scripts/check_commit_safety.py"

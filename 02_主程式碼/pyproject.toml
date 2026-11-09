@@ -1,0 +1,13 @@
+# Code style for the Python sources. Run scripts/check.ps1 (or `python -m black .`)
+# before committing; black also checks that formatting does not change the program.
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+skip-string-normalization = true
+extend-exclude = '''
+/(
+    \.venv
+  | web
+  | runtime
+)/
+'''

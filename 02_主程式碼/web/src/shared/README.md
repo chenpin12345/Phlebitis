@@ -1,5 +1,7 @@
-# 共用介面能力
+# shared：共用介面
 
-API client、請求合併／取消／輪詢、dialog、表格、分頁與格式化。ui.tsx 仍提供相容匯出。
-
-程式碼與文件納入版本控制；不接受照片、權重或金鑰。測試見 tests/test_performance_imports.py 與 web/import-regression.mjs。
+- `ui.tsx`：API client（`api`、`useData` 輪詢）、hash 路由、格式化與小元件。
+- `dialog.tsx`、`selection.tsx`、`toast.ts`／`toasts.tsx`：對話框、多選、提示。
+- `topbar.tsx`：頁首的全域搜尋與通知鈴。
+- `background-ops.ts`：追蹤背景中的垃圾桶操作。
+- `readable.tsx`、`app-ui.tsx`：易讀的欄位呈現與空狀態。

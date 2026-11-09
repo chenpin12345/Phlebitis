@@ -1,5 +1,6 @@
 """Management-only routes for LINE research intake and the offline LINE simulator.
 Mounted on the local workbench (127.0.0.1, CSRF, origin checks); never on the public LINE app."""
+
 from typing import Literal
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
@@ -34,14 +35,39 @@ def mount(app):
     router = APIRouter(prefix='/api/v1')
 
     @router.get('/intake')
-    def intake_query(source: str = '', state: str = '', usage: str = '', label: str = '', start: str = '', end: str = '', page: int = 1, size: int = 30):
-        return intake.query(source=source, state=state, usage=usage, label=label, start=start, end=end, page=page, size=size)
+    def intake_query(
+        source: str = '',
+        state: str = '',
+        usage: str = '',
+        label: str = '',
+        start: str = '',
+        end: str = '',
+        page: int = 1,
+        size: int = 30,
+    ):
+        return intake.query(
+            source=source, state=state, usage=usage, label=label, start=start, end=end, page=page, size=size
+        )
+
+    @router.get('/intake/stats')
+    def intake_stats(period: str = '30', source: str = 'line'):
+        return intake.usage_stats(period=period, source=source)
 
     @router.get('/intake/consent-config')
     def consent_config():
         cfg = intake.consent_config()
-        return {'line_enabled': cfg['line_enabled'], 'simulator_enabled': cfg['simulator_enabled'], 'current_version': cfg['current_version'],
-                'versions': cfg['versions'], 'line_offer': intake.offer('line'), 'simulator_offer': intake.offer('simulator')}
+        return {
+            'line_enabled': cfg['line_enabled'],
+            'simulator_enabled': cfg['simulator_enabled'],
+            'current_version': cfg['current_version'],
+            'versions': cfg['versions'],
+            'line_offer': intake.offer('line'),
+            'simulator_offer': intake.offer('simulator'),
+        }
+
+    @router.get('/intake/by-image/{image_id}')
+    def intake_by_image(image_id: str):
+        return intake.by_image(image_id)
 
     @router.get('/intake/{ident}/image')
     def intake_image(ident: str):
@@ -67,11 +93,25 @@ def mount(app):
     def rich_menu():
         from src.line_bot.menu import definition
         from src.line_bot.messages import QUICK_LABELS, supported_types, quick_reply
+
         payload, areas = definition()
-        return {'menu': payload, 'areas': areas, 'quick_reply': quick_reply(), 'quick_labels': QUICK_LABELS, 'supported': supported_types(),
-                'consent_offer': intake.offer('simulator'), 'scenarios': sorted(simulation.SCENARIOS - {''}),
-                'reference': {'checked_on': '2026-10-13', 'sources': ['LINE Developers Messaging API reference（訊息類型、quick reply、postback、rich menu 尺寸與區域）', 'Flex Message 元件規格（bubble/box/text 屬性）'],
-                              'limits': '外觀為近似樣式，未取得逐版本官方畫面，不宣稱逐像素一致；色彩與尺寸集中於 CSS 變數可調整。'}}
+        return {
+            'menu': payload,
+            'areas': areas,
+            'quick_reply': quick_reply(),
+            'quick_labels': QUICK_LABELS,
+            'supported': supported_types(),
+            'consent_offer': intake.offer('simulator'),
+            'scenarios': sorted(simulation.SCENARIOS - {''}),
+            'reference': {
+                'checked_on': '2026-10-13',
+                'sources': [
+                    'LINE Developers Messaging API reference（訊息類型、quick reply、postback、rich menu 尺寸與區域）',
+                    'Flex Message 元件規格（bubble/box/text 屬性）',
+                ],
+                'limits': '外觀為近似樣式，未取得逐版本官方畫面，不宣稱逐像素一致；色彩與尺寸集中於 CSS 變數可調整。',
+            },
+        }
 
     @router.get('/simulation/{session}/messages')
     def transcript(session: str, before: int | None = None, limit: int = 30):

@@ -3,9 +3,13 @@
 Layout (workspace-layout.json one level above the code folder):
   01_文件與紀錄/        docs, verification evidence, reports   -> DOCS_ROOT
   02_主程式碼/          src, web, tests, scripts, configs       -> CODE_ROOT
-  03_模型與影像資料/    data, models, runs, runtime, inbox      -> STORE_ROOT
-Without a layout file every root is the code folder (legacy single-folder project).
+  03_模型與影像資料/    data, models, runs, runtime, archive    -> STORE_ROOT
+  04_備份/              daily record backups, pre-change copies -> BACKUP_ROOT  (optional key "backups")
+  05_匯入區/            photos and model packages to import     -> INBOX_ROOT   (optional key "inbox")
+Without the optional keys, backups and inbox stay inside the storage area (STORE_ROOT/backups,
+STORE_ROOT/inbox).  Without a layout file every root is the code folder (legacy single-folder project).
 """
+
 from __future__ import annotations
 
 import json
@@ -14,6 +18,7 @@ from pathlib import Path
 CODE_ROOT = Path(__file__).resolve().parents[1]
 LAYOUT_FILE = CODE_ROOT.parent / 'workspace-layout.json'
 KEYS = ('code', 'storage', 'docs')
+OPTIONAL_KEYS = ('backups', 'inbox')
 
 
 def read_layout() -> tuple[Path, dict]:
@@ -23,7 +28,7 @@ def read_layout() -> tuple[Path, dict]:
     layout = json.loads(LAYOUT_FILE.read_text(encoding='utf-8-sig'))
     if layout.get('version') != 1:
         raise ValueError('Unsupported workspace layout version')
-    for key in KEYS:
+    for key in KEYS + tuple(k for k in OPTIONAL_KEYS if k in layout):
         value = Path(layout[key])
         if value.is_absolute() or not (root / value).resolve().is_relative_to(root):
             raise ValueError('Layout paths must remain within the workspace: ' + key)
@@ -41,7 +46,15 @@ def _area(key: str) -> Path:
 
 STORE_ROOT = _area('storage')
 DOCS_ROOT = _area('docs')
+BACKUP_ROOT = _area('backups') if 'backups' in LAYOUT else STORE_ROOT / 'backups'
+INBOX_ROOT = _area('inbox') if 'inbox' in LAYOUT else STORE_ROOT / 'inbox'
 # Where generated evidence (environment checks, smoke results) is written.
 EVIDENCE_DIR = DOCS_ROOT / '驗證報告' if LAYOUT else DOCS_ROOT / 'docs'
 LINE_MENU_DIR = DOCS_ROOT / 'LINE選單' if LAYOUT else DOCS_ROOT / 'docs/line_menu'
 ENV_FILE = WORKSPACE_ROOT / '.env'
+
+
+def workspace_path(value: str | Path) -> Path:
+    """A path written in a config file: relative paths are relative to the workspace root."""
+    path = Path(value)
+    return path if path.is_absolute() else (WORKSPACE_ROOT / path).resolve()

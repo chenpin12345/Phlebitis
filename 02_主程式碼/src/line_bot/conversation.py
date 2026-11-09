@@ -5,6 +5,7 @@ simulator (synthetic events, local transport that never contacts LINE) both call
 service, so deduplication, busy/queue rules, unsend, consent and withdrawal behave the
 same way.  Inference and delivery remain in the transport-specific callers.
 """
+
 from __future__ import annotations
 
 import re
@@ -59,7 +60,12 @@ def parse(event: dict) -> Incoming | None:
     source = event.get('source') or {}
     redelivery = bool((event.get('deliveryContext') or {}).get('isRedelivery'))
     if kind == 'unsend':
-        return Incoming('unsend', event.get('webhookEventId'), str((event.get('unsend') or {}).get('messageId', '')), source.get('userId', ''))
+        return Incoming(
+            'unsend',
+            event.get('webhookEventId'),
+            str((event.get('unsend') or {}).get('messageId', '')),
+            source.get('userId', ''),
+        )
     user = source.get('userId', '')
     if source.get('type') != 'user' or not user:
         return None
@@ -70,7 +76,15 @@ def parse(event: dict) -> Incoming | None:
     if kind == 'follow':
         return Incoming('follow', eid, '', user, reply, text='專題介紹', redelivery=redelivery)
     if kind == 'postback':
-        return Incoming('postback', eid, 'postback:' + eid, user, reply, data=(event.get('postback') or {}).get('data'), redelivery=redelivery)
+        return Incoming(
+            'postback',
+            eid,
+            'postback:' + eid,
+            user,
+            reply,
+            data=(event.get('postback') or {}).get('data'),
+            redelivery=redelivery,
+        )
     if kind == 'message':
         mtype, mid = message.get('type'), str(message.get('id', ''))
         if mtype == 'text':
@@ -83,29 +97,49 @@ def parse(event: dict) -> Incoming | None:
 
 class Research:
     """Port to the research-consent store (workbench database)."""
+
     def __init__(self, home=None, root=None):
         self.home, self.root = home, root
 
     def _kw(self):
         from src.workbench import intake
+
         return {'home': self.home or intake.HOME, 'root': self.root or intake.ROOT}
 
     def offer(self, source):
         from src.workbench import intake
+
         return intake.offer(source, self._kw()['root'])
 
     def decide(self, **kwargs):
         from src.workbench import intake
+
         return intake.decide(**kwargs, **self._kw())
 
     def withdraw_user(self, **kwargs):
         from src.workbench import intake
+
         return intake.withdraw_user(**kwargs, home=self._kw()['home'])
+
+    def record_usage(self, home=None, **kwargs):
+        from src.workbench import intake
+
+        return intake.record_usage(**kwargs, home=home or self._kw()['home'])
 
 
 class Conversation:
-    def __init__(self, store, *, source, user_key, pending_dir: Path, research: Research | None = None,
-                 message_id_pattern=r'[0-9]+', clock=time.time, session=None):
+    def __init__(
+        self,
+        store,
+        *,
+        source,
+        user_key,
+        pending_dir: Path,
+        research: Research | None = None,
+        message_id_pattern=r'[0-9]+',
+        clock=time.time,
+        session=None,
+    ):
         self.store, self.source, self.user_key = store, source, user_key
         self.pending_dir, self.research = Path(pending_dir), research or Research()
         self.pattern, self.clock, self.session = re.compile(message_id_pattern), clock, session
@@ -129,8 +163,14 @@ class Conversation:
                 return []
             text = (incoming.text or '').strip()
             if text == M.WITHDRAW:
-                count = self.research.withdraw_user(source=self.source, user_key=key, event_id=incoming.event_id)['withdrawn']
-                message = f'已撤回 {count} 張照片的研究使用同意，並立即停止研究使用；研究副本會由系統刪除。已訓練模型無法移除既有影響，研究人員會重新評估。' if count else '目前沒有生效中的研究使用同意。照片分析功能不受影響。'
+                count = self.research.withdraw_user(source=self.source, user_key=key, event_id=incoming.event_id)[
+                    'withdrawn'
+                ]
+                message = (
+                    f'已撤回 {count} 張照片的研究使用同意，並立即停止研究使用；研究副本會由系統刪除。已訓練模型無法移除既有影響，研究人員會重新評估。'
+                    if count
+                    else '目前沒有生效中的研究使用同意。照片分析功能不受影響。'
+                )
                 return reply(M.text_message(message))
             return reply(M.text_message(M.command(text, self.consent_offer())))
         if incoming.kind == 'postback':
@@ -169,10 +209,20 @@ class Conversation:
         if job['user_key'] != key:
             return 'not_owner'
         pending = self.pending_dir / (ref + '.jpg')
-        return self.research.decide(source=self.source, simulated=self.source != 'line', user_key=key, session=self.session,
-                                    event_id=incoming.event_id, message_id=job['message_id'], result_token=ref, version=data.get('v'),
-                                    decision=data['decision'], pending=pending if pending.is_file() else None,
-                                    prediction=job.get('record'), clock=self.clock)['status']
+        return self.research.decide(
+            source=self.source,
+            simulated=self.source != 'line',
+            user_key=key,
+            session=self.session,
+            event_id=incoming.event_id,
+            message_id=job['message_id'],
+            result_token=ref,
+            version=data.get('v'),
+            decision=data['decision'],
+            pending=pending if pending.is_file() else None,
+            prediction=job.get('record'),
+            clock=self.clock,
+        )['status']
 
     def queue_full(self, event_id):
         self.store.update(event_id, 'rejected')
@@ -183,14 +233,39 @@ class Conversation:
         offer = self.consent_offer()
         if offer and record.get('status') in ('suspected', 'not_detected', 'needs_review'):
             from src.workbench.intake import save_pending
+
             save_pending(raw, self.pending_dir / (token + '.jpg'), service_config)
         else:
             offer = None
         expires = self.clock() + ttl
-        summary = {k: record.get(k) for k in ('status', 'task', 'task_type', 'label_scheme', 'model_version', 'prediction_score', 'predicted_class', 'class_scores', 'binary_prediction', 'demo_only')}
+        summary = {
+            k: record.get(k)
+            for k in (
+                'status',
+                'task',
+                'task_type',
+                'label_scheme',
+                'model_version',
+                'prediction_score',
+                'predicted_class',
+                'class_scores',
+                'binary_prediction',
+                'demo_only',
+            )
+        }
         summary['note'] = '模型預測僅供參考，不是人工標籤'
         self.store.update(event_id, 'completed', token=token, expires=expires)
         self.store.save_result(token, summary, expires)
+        try:
+            self.research.record_usage(
+                source=self.source,
+                record=record,
+                consent_offered=bool(offer),
+                clock=self.clock,
+                home=getattr(self, 'usage_home', None),
+            )
+        except Exception:
+            pass  # usage statistics (C3) never affect the reply
         return offer
 
     def result_messages(self, record, url, token, offer):
